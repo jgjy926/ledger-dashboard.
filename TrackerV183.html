@@ -587,87 +587,38 @@
   }
 
   /***********************
-   * AppStore
-   ***********************/
-  const AppStore = (() => {
-    const KEY_TX="ott_tx_v2", KEY_OPEN="ott_opening_v2", KEY_LOCK="ott_lock_v2";
-    const _load=(k,f)=>{ try{const r=localStorage.getItem(k); return r?JSON.parse(r):f;}catch{return f;}};
-    const _save=(k,v)=>localStorage.setItem(k, JSON.stringify(v));
-    const _id=()=> "tx_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,9);
-    const _monthKey=(d)=>String(d||"").slice(0,7);
-    const _norm=(r)=>{
-      const date=String(r.date||"").slice(0,10);
-      let amount=Number(r.amount||0); if(!isFinite(amount)) amount=0;
-      const month=r.month||_monthKey(date);
-      return {id:r.id||_id(), date, month, details:String(r.details||"").trim(), amount, remark:String(r.remark||"").trim()};
-    };
-    const getAll=()=>_load(KEY_TX,[]).map(_norm);
-    const getById=(id)=>getAll().find(x=>x.id===id)||null;
-    const getByMonth=()=>{
-      const arr=getAll(); const map={};
-      for(const r of arr){ if(!map[r.month]) map[r.month]=[]; map[r.month].push(r); }
-      for(const m of Object.keys(map)) map[m].sort((a,b)=>(a.date||"").localeCompare(b.date||""));
-      return Object.fromEntries(Object.entries(map).sort((a,b)=>a[0].localeCompare(b[0])));
-    };
-    const isMonthLocked=(month)=>Boolean((_load(KEY_LOCK,{}))[month]);
-    const setMonthLocked=(month,locked)=>{ const m=_load(KEY_LOCK,{}); m[month]=Boolean(locked); _save(KEY_LOCK,m); };
-    const getOpening=(month)=>{ const m=_load(KEY_OPEN,{}); const v=Number(m[month]??0); return isFinite(v)?v:0; };
-    const setOpening=(month,val)=>{ const m=_load(KEY_OPEN,{}); m[month]=Number(val||0); _save(KEY_OPEN,m); };
-    const add=(record)=>{
-      const arr=_load(KEY_TX,[]).map(_norm);
-      const rec=_norm(record);
-      if(!rec.date||!rec.details||rec.amount===0) return false;
-      if(isMonthLocked(rec.month)) return false;
-      arr.push(rec); _save(KEY_TX,arr); return true;
-    };
-    const addMany=(records)=>{
-      const arr=_load(KEY_TX,[]).map(_norm); let added=0;
-      for(const r of records||[]){
-        const rec=_norm(r);
-        if(!rec.date||!rec.details||rec.amount===0) continue;
-        if(isMonthLocked(rec.month)) continue;
-        arr.push(rec); added++;
-      }
-      _save(KEY_TX,arr); return added;
-    };
-    const update=(id,patch)=>{
-      const arr=_load(KEY_TX,[]).map(_norm);
-      const idx=arr.findIndex(x=>x.id===id); if(idx<0) return false;
-      const next=_norm({...arr[idx],...patch,id});
-      if(isMonthLocked(next.month)) return false;
-      arr[idx]=next; _save(KEY_TX,arr); return true;
-    };
-    const remove=(id)=>{
-      const arr=_load(KEY_TX,[]).map(_norm);
-      const rec=arr.find(x=>x.id===id);
-      if(rec && isMonthLocked(rec.month)) return false;
-      _save(KEY_TX,arr.filter(x=>x.id!==id)); return true;
-    };
-    const clearAll=()=>{ localStorage.removeItem(KEY_TX); localStorage.removeItem(KEY_OPEN); localStorage.removeItem(KEY_LOCK); };
-    const getMonthLedger=(month)=>{
-      const map=getByMonth(); const months=Object.keys(map);
-      let opening=getOpening(month);
-      if(!opening){ const idx=months.indexOf(month); if(idx>0) opening=getMonthLedger(months[idx-1]).closing; }
-      let debit=0, credit=0, running=opening;
-      const rows=(map[month]||[]).map(r=>{
-        const amt=Number(r.amount||0);
-        if(amt>0) debit+=amt;
-        if(amt<0) credit+=Math.abs(amt);
-        running+=amt;
-        return {...r, running};
-      });
-      return {month, opening, debit, credit, net: credit-debit, closing: running, rows};
-    };
-    const getAllMonthLedgers=()=>{ const map=getByMonth(); return Object.keys(map).map(m=>getMonthLedger(m)); };
-    const getStatsAll=()=>{
-      const ledgers=getAllMonthLedgers();
-      let count=0,totalDebit=0,totalCredit=0;
-      for(const l of ledgers){ count+=l.rows.length; totalDebit+=l.debit; totalCredit+=l.credit; }
-      return {count,totalDebit,totalCredit,net: totalCredit-totalDebit};
-    };
-    const exportJSON=()=>JSON.stringify(getAll(),null,2);
-    return {getAll,getById,getByMonth,add,addMany,update,remove,clearAll,getOpening,setOpening,isMonthLocked,setMonthLocked,getMonthLedger,getAllMonthLedgers,getStatsAll,exportJSON};
-  })();
+ * AppStore
+ ***********************/
+const AppStore = (() => {
+
+  const KEY_TX="ott_tx_v2", KEY_OPEN="ott_opening_v2", KEY_LOCK="ott_lock_v2";
+
+  const _load=(k,f)=>{ try{const r=localStorage.getItem(k); return r?JSON.parse(r):f;}catch{return f;}};
+  const _save=(k,v)=>localStorage.setItem(k, JSON.stringify(v));
+
+  const getAll=()=>_load(KEY_TX,[]);
+
+  const exportState = () => ({
+    tx: _load(KEY_TX, []),
+    opening: _load(KEY_OPEN, {}),
+    lock: _load(KEY_LOCK, {})
+  });
+
+  const importState = (st) => {
+    if(!st || typeof st !== "object") return false;
+    if(Array.isArray(st.tx)) _save(KEY_TX, st.tx);
+    if(st.opening && typeof st.opening === "object") _save(KEY_OPEN, st.opening);
+    if(st.lock && typeof st.lock === "object") _save(KEY_LOCK, st.lock);
+    return true;
+  };
+
+  return {
+    getAll,
+    exportState,
+    importState
+  };
+
+})();   // ✅ ONLY close here
 
   /***********************
    * Calendar picker
