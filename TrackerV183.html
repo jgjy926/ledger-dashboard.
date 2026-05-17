@@ -113,9 +113,8 @@
             <button id="btnExportXlsx">Export Excel (.xlsx)</button>
             <button id="btnExportPdf">Export PDF</button>
             <button id="btnExportJson">Export JSON</button>
-			<button id="btnCloudLoad">Load Cloud</button>
-			<button id="btnCloudSave">Save Cloud</button>
-
+            <button id="btnCloudLoad">Load Cloud</button>
+            <button id="btnCloudSave">Save Cloud</button>
             <button class="danger" id="btnClear">Clear</button>
           </div>
           <div class="muted" id="libStatus">Libs: checking…</div>
@@ -261,7 +260,7 @@
     <div id="months"></div>
   </div>
 
-  <!-- IMPORT PREVIEW (PDF + SMART CSV/XLSX) -->
+  <!-- IMPORT PREVIEW -->
   <div class="modalMask" id="maskImport">
     <div class="modal">
       <div class="row space">
@@ -274,7 +273,7 @@
 
       <div class="hr"></div>
 
-      <!-- SMART MAPPING (shown only for CSV/XLSX) -->
+      <!-- SMART MAPPING -->
       <div id="mapSection" style="display:none">
         <div class="sectionTitle">Smart Mapping</div>
         <div class="muted">Auto-detected fields. Adjust if needed, then click “Rebuild Preview”.</div>
@@ -331,7 +330,7 @@
         <div class="hr"></div>
       </div>
 
-      <!-- PDF year controls stay -->
+      <!-- PDF year controls -->
       <div class="grid2" id="pdfSection">
         <div class="field">
           <label>Detected Type</label>
@@ -398,10 +397,16 @@
 
   <!-- LIBS -->
   <script src="./pdf.min.js"></script>
-  <script> if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "./pdf.worker.min.js"; </script>
+  <script>
+    if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "./pdf.worker.min.js";
+  </script>
   <script src="./xlsx.full.min.js"></script>
   <script src="./tesseract/tesseract.min.js"></script>
 
+  <!-- ✅ OPTION A: LOAD FULL APPSTORE FROM EXTERNAL FILE -->
+  <script src="./app-store.js"></script>
+
+  <!-- MAIN APP -->
   <script>
   /***********************
    * Base helpers (fixed escapeHtml)
@@ -433,19 +438,13 @@
     const n=Number(s);
     return isFinite(n)?n*sign:0;
   }
-  function computeDebitCredit(records){
-    let debit=0, credit=0;
-    for(const r of records){ const a=Number(r.amount||0); if(a>0) debit+=a; if(a<0) credit+=Math.abs(a); }
-    return {count:records.length,debit,credit};
-  }
 
   const MMM = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   function fmtMonthMMM(monthISO){
     const m=String(monthISO||"").match(/^(\d{4})-(\d{2})$/);
     if(!m) return monthISO||"";
     const mm = Number(m[2]) - 1;
-    return `${MMM[mm] || "??"}.${m[1]}`; // <- Mar.2026
-
+    return `${MMM[mm] || "??"}.${m[1]}`; // e.g. Mar.2026
   }
   function fmtDateDDMMMYYYY(iso){
     const m=String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -465,12 +464,11 @@
   }
 
   /***********************
-   * NEW: Date normalization (consistent with PDF OCR output)
+   * Date normalization
    ***********************/
   function normalizeToISODate(val, order="DMY"){
     if(val === null || val === undefined || val === "") return "";
 
-    // Date object (XLSX cellDates:true)
     if(val instanceof Date && !isNaN(val.getTime())){
       const y=val.getFullYear();
       const m=String(val.getMonth()+1).padStart(2,"0");
@@ -478,9 +476,7 @@
       return `${y}-${m}-${d}`;
     }
 
-    // Excel serial number
     if(typeof val === "number" && isFinite(val)){
-      // Excel epoch: 1899-12-30 (accounts for Excel leap-year bug)
       const base = Date.UTC(1899, 11, 30);
       const ms = base + Math.round(val * 86400000);
       const d = new Date(ms);
@@ -491,17 +487,14 @@
     const s = String(val).trim();
     if(!s) return "";
 
-    // ISO already
     if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
 
-    // 2026/05/16 or 2026.05.16
     let m = s.match(/^(\d{4})[\/\.\-](\d{1,2})[\/\.\-](\d{1,2})$/);
     if(m){
       const yyyy=m[1], mm=String(m[2]).padStart(2,"0"), dd=String(m[3]).padStart(2,"0");
       return `${yyyy}-${mm}-${dd}`;
     }
 
-    // 16/05/2026 or 16-05-2026
     m = s.match(/^(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2}|\d{4})$/);
     if(m){
       let a=Number(m[1]), b=Number(m[2]), c=String(m[3]);
@@ -509,16 +502,12 @@
       let dd, mm;
       if(order==="DMY"){ dd=a; mm=b; }
       else if(order==="MDY"){ mm=a; dd=b; }
-      else { // YMD not applicable here, fallback DMY
-        dd=a; mm=b;
-      }
+      else { dd=a; mm=b; }
       return `${yyyy}-${String(mm).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
     }
 
-    // Fallback Date parsing (last resort)
     const d = new Date(s);
     if(!isNaN(d.getTime())) return d.toISOString().slice(0,10);
-
     return "";
   }
 
@@ -536,7 +525,7 @@
   }
 
   /***********************
-   * OCR config resolver (keeps V15 working)
+   * OCR config resolver
    ***********************/
   async function urlOk(url){
     try{ const r=await fetch(url,{method:"GET"}); return r.ok; }catch{return false;}
@@ -587,40 +576,6 @@
   }
 
   /***********************
- * AppStore
- ***********************/
-const AppStore = (() => {
-
-  const KEY_TX="ott_tx_v2", KEY_OPEN="ott_opening_v2", KEY_LOCK="ott_lock_v2";
-
-  const _load=(k,f)=>{ try{const r=localStorage.getItem(k); return r?JSON.parse(r):f;}catch{return f;}};
-  const _save=(k,v)=>localStorage.setItem(k, JSON.stringify(v));
-
-  const getAll=()=>_load(KEY_TX,[]);
-
-  const exportState = () => ({
-    tx: _load(KEY_TX, []),
-    opening: _load(KEY_OPEN, {}),
-    lock: _load(KEY_LOCK, {})
-  });
-
-  const importState = (st) => {
-    if(!st || typeof st !== "object") return false;
-    if(Array.isArray(st.tx)) _save(KEY_TX, st.tx);
-    if(st.opening && typeof st.opening === "object") _save(KEY_OPEN, st.opening);
-    if(st.lock && typeof st.lock === "object") _save(KEY_LOCK, st.lock);
-    return true;
-  };
-
-  return {
-    getAll,
-    exportState,
-    importState
-  };
-
-})();   // ✅ ONLY close here
-
-  /***********************
    * Calendar picker
    ***********************/
   let calView=new Date();
@@ -656,7 +611,7 @@ const AppStore = (() => {
   }
 
   /***********************
-   * OCR worker (same as v15)
+   * OCR worker
    ***********************/
   let ocrWorker=null;
   async function initOcrWorker(){
@@ -754,7 +709,7 @@ const AppStore = (() => {
   /***********************
    * SMART IMPORT: CSV/XLSX
    ***********************/
-  let smartImportState = null; // {type:'csv'|'xlsx', file, sheetNames, activeSheet, headers, rows, mapping, dateOrder}
+  let smartImportState = null;
   function lower(s){ return String(s||"").toLowerCase(); }
 
   function guessMapping(headers){
@@ -774,12 +729,10 @@ const AppStore = (() => {
     const detailsCol = pickBest(["details","detail","description","desc","merchant","particular","butiran","narration"]);
     const remarkCol = pickBest(["remark","notes","note","catatan","reference","ref"]);
 
-    // amount vs debit/credit detection
     const debitCol = pickBest(["debit","dr","withdrawal","out"]);
     const creditCol = pickBest(["credit","cr","deposit","in"]);
     const amountCol = pickBest(["amount","amt","value","rm","jumlah","transaction amount"]);
 
-    // if debit/credit both exist strongly, prefer them and set amount none
     const hasDC = debitCol!=="(none)" && creditCol!=="(none)";
     return {
       dateCol: dateCol!=="(none)"?dateCol:"(none)",
@@ -820,27 +773,17 @@ const AppStore = (() => {
       }else{
         const d = mapping.debitCol && mapping.debitCol!=="(none)" ? parseAmountRaw(row[mapping.debitCol]) : 0;
         const c = mapping.creditCol && mapping.creditCol!=="(none)" ? parseAmountRaw(row[mapping.creditCol]) : 0;
-        // Convention: debit positive, credit negative (internal)
         amount = d - c;
       }
 
       if(!dateISO || !details || amount===0) continue;
-      recs.push({
-        date: dateISO,
-        month: dateISO.slice(0,7),
-        details,
-        amount,
-        remark
-      });
+      recs.push({ date: dateISO, month: dateISO.slice(0,7), details, amount, remark });
     }
-    // sort old->new
     recs.sort((a,b)=> (a.month||"").localeCompare(b.month||"") || (a.date||"").localeCompare(b.date||""));
     return recs;
   }
 
   function openSmartImportWizard(kind, payload){
-    // kind: 'csv' | 'xlsx'
-    // payload: {rows, headers, sheetNames?, activeSheet?}
     smartImportState = {
       kind,
       rows: payload.rows,
@@ -851,22 +794,19 @@ const AppStore = (() => {
       mapping: guessMapping(payload.headers)
     };
 
-    // show mapping section, hide pdf section
     document.getElementById("mapSection").style.display="block";
     document.getElementById("pdfSection").style.display="none";
-    document.getElementById("btnReparse").style.display="none"; // not for csv/xlsx
+    document.getElementById("btnReparse").style.display="none";
     document.getElementById("pvYear").value = "";
 
     document.getElementById("importTitle").textContent = "Import Preview (Smart " + (kind==="xlsx"?"XLSX":"CSV") + ")";
     document.getElementById("importSubtitle").textContent = "Map columns → rebuild preview → select/edit rows → import.";
 
-    // sheet selector
     const mapSheet=document.getElementById("mapSheet");
     mapSheet.innerHTML = smartImportState.sheetNames.map(s=>`<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
     mapSheet.value = smartImportState.activeSheet;
     mapSheet.disabled = (kind!=="xlsx");
 
-    // populate mapping dropdowns
     populateMapDropdown("mapDateCol", smartImportState.headers, false);
     populateMapDropdown("mapDetailsCol", smartImportState.headers, false);
     populateMapDropdown("mapRemarkCol", smartImportState.headers, true);
@@ -876,7 +816,6 @@ const AppStore = (() => {
 
     applyMappingToUI(smartImportState.mapping);
 
-    // Build initial preview
     rebuildSmartPreview();
     document.getElementById("maskImport").style.display="flex";
   }
@@ -884,7 +823,6 @@ const AppStore = (() => {
   function rebuildSmartPreview(){
     if(!smartImportState) return;
 
-    // read mapping from UI
     const mapping = {
       dateCol: document.getElementById("mapDateCol").value,
       detailsCol: document.getElementById("mapDetailsCol").value,
@@ -899,7 +837,6 @@ const AppStore = (() => {
 
     const recs = buildRecordsFromMapping(smartImportState.rows, mapping, dateOrder);
 
-    // store in pending (reuse import preview flow)
     pending = {kind: smartImportState.kind.toUpperCase(), text:"", records: recs, years: []};
     document.getElementById("pvType").value = pending.kind;
     document.getElementById("pvStatus").textContent = `Built ${recs.length} record(s) from mapping`;
@@ -989,7 +926,9 @@ const AppStore = (() => {
     const selectedIdx=new Set();
     document.querySelectorAll(".pvChk").forEach(chk=>{ if(chk.checked) selectedIdx.add(Number(chk.dataset.idx)); });
 
-    return recs.filter((_,i)=>selectedIdx.has(i)).filter(r=>r.date && r.details && r.amount!==0);
+    return recs
+      .filter((_,i)=>selectedIdx.has(i))
+      .filter(r=>r.date && r.details && r.amount!==0);
   }
 
   /***********************
@@ -1061,8 +1000,8 @@ const AppStore = (() => {
     if(!months.includes(uiMonth) && uiMonth!=="ALL") uiMonth="ALL";
 
     document.getElementById("monthFilter").innerHTML =
-    "<option value='ALL'>ALL</option>" +
-    months.map(m => `<option value="${m}">${fmtMonthMMM(m)}</option>`).join("");
+      "<option value='ALL'>ALL</option>" +
+      months.map(m => `<option value="${m}">${fmtMonthMMM(m)}</option>`).join("");
 
     document.getElementById("monthFilter").value=uiMonth;
 
@@ -1070,7 +1009,10 @@ const AppStore = (() => {
     updatePeriodPill();
     renderTabs(months);
 
-    const s=(uiMonth==="ALL")?AppStore.getStatsAll():(()=>{const L=AppStore.getMonthLedger(uiMonth);return{count:L.rows.length,totalDebit:L.debit,totalCredit:L.credit,net:L.net};})();
+    const s=(uiMonth==="ALL")
+      ? AppStore.getStatsAll()
+      : (()=>{const L=AppStore.getMonthLedger(uiMonth);return{count:L.rows.length,totalDebit:L.debit,totalCredit:L.credit,net:L.net};})();
+
     document.getElementById("kpiCount").textContent=String(s.count);
     document.getElementById("kpiDebit").textContent=fmt(s.totalDebit);
     document.getElementById("kpiCredit").textContent=fmt(s.totalCredit);
@@ -1125,17 +1067,12 @@ const AppStore = (() => {
     const m = (uiMonth === "ALL") ? (months[0] || "") : uiMonth;
 
     const sel = document.getElementById("selMonth");
-    sel.dataset.monthKey = m || "";                 // keep true key here
-    sel.value = m ? fmtMonthMMM(m) : "(none)";      // display only
-
-if(m){
-  document.getElementById("openingInput").value = String(AppStore.getOpening(m) || "");
-  document.getElementById("lockSelect").value = AppStore.isMonthLocked(m) ? "1" : "0";
-}
+    sel.dataset.monthKey = m || "";
+    sel.value = m ? fmtMonthMMM(m) : "(none)";
 
     if(m){
-      document.getElementById("openingInput").value = String(AppStore.getOpening(m)||"");
-      document.getElementById("lockSelect").value = AppStore.isMonthLocked(m) ? "1":"0";
+      document.getElementById("openingInput").value = String(AppStore.getOpening(m) || "");
+      document.getElementById("lockSelect").value = AppStore.isMonthLocked(m) ? "1" : "0";
     }
   }
 
@@ -1227,44 +1164,14 @@ ${ledgers.map(L=>`
   }
 
   /***********************
-   * PDF handler (unchanged)
-   ***********************/
-  async function handlePdf(file){
-    await updateLibStatus();
-    setProgress(5,"Extracting PDF text layer…");
-    const {text,pages} = await pdfExtractText(file);
-    let finalText=text;
-    if(!finalText || finalText.length<20){
-      setProgress(5,`No text layer. OCR (${pages} pages)…`);
-      finalText = await ocrPdfToText(file);
-    }
-    if(!finalText || finalText.length<20){
-      setProgress(0,"No text after OCR."); return;
-    }
-    const years=yearCandidatesFromText(finalText);
-    const prefill=(years.length===1)?String(years[0]):"";
-    const sav=parseMaybankSavings(finalText);
-    const cc=parseMaybankCC(finalText,prefill);
-    if(sav.length>=2 && sav.length>=cc.length){
-      openImportModal("SAVINGS", finalText, sav, years, "");
-      setProgress(100, "Parsed savings statement. Review & import.");
-    } else {
-      openImportModal("CC", finalText, cc, years, prefill);
-      setProgress(100, "Parsed credit card statement. Review & import.");
-    }
-  }
-
-  /***********************
-   * CSV/XLSX handlers (V17 smarter import)
+   * CSV/XLSX handlers
    ***********************/
   async function parseCSVToRows(file){
     const text=await file.text();
     const lines=text.split(/\r?\n/).filter(l=>l.trim().length);
     if(!lines.length) return {headers:[], rows:[]};
 
-    // naive CSV split (works for your typical export; for quoted commas, use XLSX route)
     const first = lines[0].split(",").map(s=>s.trim());
-    // header guess: if first row contains any alpha
     const headerLikely = first.some(v=>/[a-zA-Z]/.test(v));
     const headers = headerLikely ? first : first.map((_,i)=>`Col${i+1}`);
     const start = headerLikely ? 1 : 0;
@@ -1282,7 +1189,6 @@ ${ledgers.map(L=>`
   function sheetToRows(wb, sheetName){
     const ws = wb.Sheets[sheetName];
     const data = XLSX.utils.sheet_to_json(ws, {defval:"", raw:true});
-    // Build unified headers set
     const headersSet = new Set();
     for(const r of data) Object.keys(r).forEach(k=>headersSet.add(k));
     const headers = Array.from(headersSet);
@@ -1305,16 +1211,13 @@ ${ledgers.map(L=>`
     const sheetNames = wb.SheetNames || [];
     if(!sheetNames.length){ setProgress(0,"No sheets found."); return; }
 
-    // Use first sheet initially
     const active = sheetNames[0];
     const {headers, rows} = sheetToRows(wb, active);
 
-    // store wb in state for sheet switching
     smartImportState = { kind:"xlsx", wb, sheetNames, activeSheet: active, headers, rows, mapping: guessMapping(headers), dateOrder:"DMY" };
     openSmartImportWizard("xlsx", {headers, rows, sheetNames, activeSheet: active});
     setProgress(100,"XLSX loaded. Map & import.");
 
-    // enable sheet switching
     document.getElementById("mapSheet").onchange = ()=>{
       if(!smartImportState || !smartImportState.wb) return;
       const sn = document.getElementById("mapSheet").value;
@@ -1337,7 +1240,7 @@ ${ledgers.map(L=>`
   }
 
   /***********************
-   * File router
+   * File router + drag/drop
    ***********************/
   async function handleFiles(fileList){
     const files=Array.from(fileList||[]);
@@ -1369,9 +1272,43 @@ ${ledgers.map(L=>`
   }
 
   /***********************
+   * PDF handler
+   ***********************/
+  async function handlePdf(file){
+    await updateLibStatus();
+    setProgress(5,"Extracting PDF text layer…");
+    const {text,pages} = await pdfExtractText(file);
+    let finalText=text;
+    if(!finalText || finalText.length<20){
+      setProgress(5,`No text layer. OCR (${pages} pages)…`);
+      finalText = await ocrPdfToText(file);
+    }
+    if(!finalText || finalText.length<20){
+      setProgress(0,"No text after OCR."); return;
+    }
+    const years=yearCandidatesFromText(finalText);
+    const prefill=(years.length===1)?String(years[0]):"";
+    const sav=parseMaybankSavings(finalText);
+    const cc=parseMaybankCC(finalText,prefill);
+    if(sav.length>=2 && sav.length>=cc.length){
+      openImportModal("SAVINGS", finalText, sav, years, "");
+      setProgress(100, "Parsed savings statement. Review & import.");
+    } else {
+      openImportModal("CC", finalText, cc, years, prefill);
+      setProgress(100, "Parsed credit card statement. Review & import.");
+    }
+  }
+
+  /***********************
    * Init wiring
    ***********************/
   function init(){
+    // Ensure AppStore exists (loaded from app-store.js)
+    if(!window.AppStore){
+      setStatus("AppStore missing. Check ./app-store.js path (Network tab for 404).");
+      return;
+    }
+
     wireDragDrop();
     updateLibStatus();
     setProgress(0,"Ready.");
@@ -1382,7 +1319,12 @@ ${ledgers.map(L=>`
     document.getElementById("monthNameFilter").onchange=applyYearMonthToRawMonth;
 
     // calendar
-    document.getElementById("calOpenBtn").onclick=(e)=>{e.preventDefault(); const pop=document.getElementById("calPop"); pop.style.display=(pop.style.display==="block"?"none":"block"); if(pop.style.display==="block") renderCalendar();};
+    document.getElementById("calOpenBtn").onclick=(e)=>{
+      e.preventDefault();
+      const pop=document.getElementById("calPop");
+      pop.style.display=(pop.style.display==="block"?"none":"block");
+      if(pop.style.display==="block") renderCalendar();
+    };
     document.getElementById("mDateDisplay").onclick=openCalendar;
     document.getElementById("calPrev").onclick=()=>{ calView=new Date(calView.getFullYear(), calView.getMonth()-1, 1); renderCalendar(); };
     document.getElementById("calNext").onclick=()=>{ calView=new Date(calView.getFullYear(), calView.getMonth()+1, 1); renderCalendar(); };
@@ -1397,16 +1339,14 @@ ${ledgers.map(L=>`
 
     // month settings
     document.getElementById("btnApplyMonth").onclick=()=>{
+      const sel = document.getElementById("selMonth");
+      const m = sel.dataset.monthKey || "";
+      if(!m) return;
 
-const sel = document.getElementById("selMonth");
-const m = sel.dataset.monthKey || "";
-if(!m) return;
-
-AppStore.setOpening(m, parseAmountRaw(document.getElementById("openingInput").value));
-AppStore.setMonthLocked(m, document.getElementById("lockSelect").value === "1");
-setStatus("Month settings applied.");
-render();
-
+      AppStore.setOpening(m, parseAmountRaw(document.getElementById("openingInput").value));
+      AppStore.setMonthLocked(m, document.getElementById("lockSelect").value === "1");
+      setStatus("Month settings applied.");
+      render();
     };
 
     // manual save
