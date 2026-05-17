@@ -704,7 +704,15 @@
     wireDragDrop();
     updateLibStatus();
     setProgress(0,"Ready.");
-    render();
+    
+if (typeof render === "function") {
+  render();
+} else {
+  console.error("render is not defined (missing or not loaded).");
+  setStatus("ERROR: render() missing. Check that render() is inside the <script> tag.");
+  return;
+}
+
 
     document.getElementById("monthFilter").onchange=(e)=>{ uiMonth=e.target.value; updatePeriodPill(); render(); };
     document.getElementById("yearFilter").onchange=applyYearMonthToRawMonth;
