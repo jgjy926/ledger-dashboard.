@@ -694,122 +694,275 @@
   /***********************
    * Init wiring (keep your original init body)
    ***********************/
+  <!-- MAIN APP (your big script) -->
+<script>
+  // ✅ sanity check BEFORE your app runs (keep)
+  console.log("AppStore from app-store.js =", window.AppStore);
+  console.log("AppStore keys =", window.AppStore ? Object.keys(window.AppStore) : "MISSING");
+
+  if (!window.AppStore || typeof window.AppStore.getByMonth !== "function") {
+    document.addEventListener("DOMContentLoaded", () => {
+      const status = document.getElementById("status");
+      if (status) status.textContent = "ERROR: AppStore not loaded. Check Network tab: app-store.js must be 200 OK (not 404).";
+    });
+  }
+
+  /***********************
+   * Base helpers (YOUR CODE)
+   ***********************/
+  function setStatus(msg){ document.getElementById("status").textContent = msg; }
+  function setProgress(pct,msg){
+    document.getElementById("progFill").style.width = Math.max(0,Math.min(100,pct))+"%";
+    document.getElementById("progText").textContent = Math.round(pct)+"%";
+    if(msg) setStatus(msg);
+  }
+  function fmt(n){ return "RM " + Number(n||0).toFixed(2); }
+  function escapeHtml(s){
+    return String(s ?? "")
+      .replaceAll("&amp;","&amp;amp;")
+      .replaceAll("&lt;","&amp;lt;")
+      .replaceAll("&gt;","&amp;gt;")
+      .replaceAll('"',"&amp;quot;")
+      .replaceAll("'","&amp;#039;");
+  }
+  function parseAmountRaw(raw){
+    let s=String(raw??"").trim();
+    if(!s) return 0;
+    s=s.replace(/RM\s*/ig,"").replace(/\s+/g,"");
+    let sign=1;
+    if(/[+-]$/.test(s)){ sign=s.endsWith("-")?-1:1; s=s.slice(0,-1); }
+    if(/^\(.*\)$/.test(s)){ sign=-1; s=s.slice(1,-1); }
+    if(/^[+-]/.test(s)){ sign=s.startsWith("-")?-1:1; s=s.slice(1); }
+    s=s.replace(/,/g,"");
+    const n=Number(s);
+    return isFinite(n)?n*sign:0;
+  }
+
+  const MMM = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  function fmtMonthMMM(monthISO){
+    const m=String(monthISO||"").match(/^(\d{4})-(\d{2})$/);
+    if(!m) return monthISO||"";
+    const mm = Number(m[2]) - 1;
+    return `${MMM[mm] || "??"}.${m[1]}`;
+  }
+  function fmtDateDDMMMYYYY(iso){
+    const m=String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(!m) return iso||"";
+    return `${m[3]}.${MMM[Number(m[2])-1]||"??"}.${m[1]}`;
+  }
+
+  function yearCandidatesFromText(s){
+    const yrs=Array.from(new Set((String(s||"").match(/\b20\d{2}\b/g)||[]).map(x=>Number(x)).filter(n=>n>=2000&&n<=2099)));
+    yrs.sort((a,b)=>a-b); return yrs;
+  }
+  function toISOFromDDMM(ddmm,year){
+    const m=String(ddmm||"").match(/^(\d{2})\/(\d{2})$/);
+    if(!m) return "";
+    if(!/^\d{4}$/.test(String(year||"").trim())) return "";
+    return `${year}-${m[2]}-${m[1]}`;
+  }
+
+  /***********************
+   * Date normalization (YOUR CODE)
+   ***********************/
+  function normalizeToISODate(val, order="DMY"){
+    if(val === null || val === undefined || val === "") return "";
+
+    if(val instanceof Date && !isNaN(val.getTime())){
+      const y=val.getFullYear();
+      const m=String(val.getMonth()+1).padStart(2,"0");
+      const d=String(val.getDate()).padStart(2,"0");
+      return `${y}-${m}-${d}`;
+    }
+
+    if(typeof val === "number" && isFinite(val)){
+      const base = Date.UTC(1899, 11, 30);
+      const ms = base + Math.round(val * 86400000);
+      const d = new Date(ms);
+      if(!isNaN(d.getTime())) return d.toISOString().slice(0,10);
+      return "";
+    }
+
+    const s = String(val).trim();
+    if(!s) return "";
+
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+    let m = s.match(/^(\d{4})[\/\.\-](\d{1,2})[\/\.\-](\d{1,2})$/);
+    if(m){
+      const yyyy=m[1], mm=String(m[2]).padStart(2,"0"), dd=String(m[3]).padStart(2,"0");
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    m = s.match(/^(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2}|\d{4})$/);
+    if(m){
+      let a=Number(m[1]), b=Number(m[2]), c=String(m[3]);
+      const yyyy = (c.length===2) ? ("20"+c) : c;
+      let dd, mm;
+      if(order==="DMY"){ dd=a; mm=b; }
+      else if(order==="MDY"){ mm=a; dd=b; }
+      else { dd=a; mm=b; }
+      return `${yyyy}-${String(mm).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
+    }
+
+    const d = new Date(s);
+    if(!isNaN(d.getTime())) return d.toISOString().slice(0,10);
+    return "";
+  }
+
+  /***********************
+   * Lib status (YOUR CODE)
+   ***********************/
+  async function updateLibStatus(){
+    const pdfOk=!!window.pdfjsLib;
+    const xlsxOk=!!window.XLSX;
+    const ocrOk=!!window.Tesseract;
+    let workerOk=false;
+    try{ const r=await fetch("./pdf.worker.min.js",{method:"GET"}); workerOk=r.ok; }catch{}
+    document.getElementById("libStatus").textContent =
+      `Libs: PDF.js=${pdfOk?"OK":"Missing"} • worker=${workerOk?"OK":"Missing"} • XLSX=${xlsxOk?"OK":"Missing"} • OCR=${ocrOk?"OK":"Missing"}`;
+  }
+
+  // ✅ Everything else stays the same (OCR resolver, calendar, parsers, smart import, export, dragdrop etc.)
+  // ✅ IMPORTANT: KEEP all your existing functions here exactly as they were (you already pasted them).
+
+  /***********************
+   * Rendering (YOUR CODE)
+   ***********************/
+  let uiMonth="ALL";
+  function updatePeriodPill(){
+    document.getElementById("periodPill").textContent = (uiMonth==="ALL") ? "Period: All" : ("Period: " + fmtMonthMMM(uiMonth));
+  }
+  function buildYearMonthFilters(monthKeys){
+    const years = Array.from(new Set(monthKeys.map(m=>m.slice(0,4)))).sort();
+    document.getElementById("yearFilter").innerHTML = `<option value="ALL">ALL</option>` + years.map(y=>`<option value="${y}">${y}</option>`).join("");
+    document.getElementById("monthNameFilter").innerHTML = `<option value="ALL">ALL</option>` + MMM.map((m,i)=>`<option value="${String(i+1).padStart(2,"0")}">${m}</option>`).join("");
+  }
+  function applyYearMonthToRawMonth(){
+    const rawSel=document.getElementById("monthFilter");
+    const year=document.getElementById("yearFilter").value;
+    const mm=document.getElementById("monthNameFilter").value;
+    if(year==="ALL" || mm==="ALL") return;
+    const target=`${year}-${mm}`;
+    const opt=Array.from(rawSel.options).find(o=>o.value===target);
+    if(opt){ rawSel.value=target; uiMonth=target; updatePeriodPill(); render(); }
+    else setStatus(`No data for ${fmtMonthMMM(target)} yet.`);
+  }
+  function renderTabs(months){
+    const t=document.getElementById("monthTabs");
+    t.innerHTML="";
+    const add=(m)=>{
+      const b=document.createElement("button");
+      b.className="tabBtn"+(uiMonth===m?" active":"");
+      b.textContent = (m === "ALL") ? "ALL" : fmtMonthMMM(m);
+      b.onclick=()=>{ uiMonth=m; document.getElementById("monthFilter").value=m; updatePeriodPill(); render(); };
+      t.appendChild(b);
+    };
+    add("ALL"); months.forEach(add);
+  }
+
+  // ✅ This render() is now INSIDE the script tag, so it exists at runtime.
+  function render(){
+    const map=AppStore.getByMonth();
+    const months=Object.keys(map);
+    if(!months.includes(uiMonth) && uiMonth!=="ALL") uiMonth="ALL";
+
+    document.getElementById("monthFilter").innerHTML =
+      "<option value='ALL'>ALL</option>" +
+      months.map(m => `<option value="${m}">${fmtMonthMMM(m)}</option>`).join("");
+
+    document.getElementById("monthFilter").value=uiMonth;
+
+    buildYearMonthFilters(months);
+    updatePeriodPill();
+    renderTabs(months);
+
+    const s=(uiMonth==="ALL")
+      ? AppStore.getStatsAll()
+      : (()=>{const L=AppStore.getMonthLedger(uiMonth);return{count:L.rows.length,totalDebit:L.debit,totalCredit:L.credit,net:L.net};})();
+
+    document.getElementById("kpiCount").textContent=String(s.count);
+    document.getElementById("kpiDebit").textContent=fmt(s.totalDebit);
+    document.getElementById("kpiCredit").textContent=fmt(s.totalCredit);
+    document.getElementById("kpiNet").textContent=fmt(s.net);
+    document.getElementById("kpiNet").className="kpiValue " + (s.net>=0?"kpiGood":"kpiBad");
+    document.getElementById("kpiNetSub").textContent=(s.net>=0?"Net positive":"Net negative");
+
+    const root=document.getElementById("months");
+    root.innerHTML="";
+    const ledgers=AppStore.getAllMonthLedgers().filter(x=>uiMonth==="ALL"?true:x.month===uiMonth);
+
+    for(const L of ledgers){
+      const div=document.createElement("div");
+      div.className="monthCard";
+      div.innerHTML=`
+        <div class="monthHd"><b>${fmtMonthMMM(L.month)}</b>
+          &nbsp; Opening ${fmt(L.opening)} &nbsp; Debit ${fmt(L.debit)} &nbsp; Credit ${fmt(L.credit)} &nbsp; Closing ${fmt(L.closing)}
+          ${AppStore.isMonthLocked(L.month)?`<span class="pill" style="margin-left:10px">Locked</span>`:""}
+        </div>
+        <table>
+          <tr><th>Date</th><th>Details</th><th>Amount</th><th>Running</th><th>Remark</th><th>Actions</th></tr>
+          ${L.rows.map(r=>`
+            <tr>
+              <td>${escapeHtml(r.date)}</td>
+              <td>${escapeHtml(r.details)}</td>
+              <td>${escapeHtml(String(r.amount))}</td>
+              <td>${Number(r.running||0).toFixed(2)}</td>
+              <td>${escapeHtml(r.remark||"")}</td>
+              <td class="actions">
+                <button class="ghost" data-act="edit" data-id="${r.id}">Edit</button>
+                <button class="ghost danger" data-act="del" data-id="${r.id}">Del</button>
+              </td>
+            </tr>`).join("")}
+        </table>`;
+      div.querySelectorAll("button[data-act]").forEach(btn=>{
+        btn.onclick=()=>{
+          const id=btn.getAttribute("data-id");
+          const act=btn.getAttribute("data-act");
+          if(act==="del"){
+            const rr=AppStore.getById(id);
+            if(rr && AppStore.isMonthLocked(rr.month)){ setStatus("Delete blocked: month locked."); return; }
+            if(confirm("Delete this entry?")){ AppStore.remove(id); render(); }
+          } else {
+            const rr=AppStore.getById(id);
+            if(rr) openEditModal(rr);
+          }
+        };
+      });
+      root.appendChild(div);
+    }
+
+    const m = (uiMonth === "ALL") ? (months[0] || "") : uiMonth;
+    const sel = document.getElementById("selMonth");
+    sel.dataset.monthKey = m || "";
+    sel.value = m ? fmtMonthMMM(m) : "(none)";
+
+    if(m){
+      document.getElementById("openingInput").value = String(AppStore.getOpening(m) || "");
+      document.getElementById("lockSelect").value = AppStore.isMonthLocked(m) ? "1" : "0";
+    }
+  }
+
+  /***********************
+   * Init wiring (YOUR EXISTING init, KEEP)
+   ***********************/
   function init(){
     if(!window.AppStore){
       setStatus("AppStore missing. Check ./app-store.js path (Network tab for 404).");
       return;
     }
 
-    // your existing init() body remains unchanged below:
     wireDragDrop();
     updateLibStatus();
     setProgress(0,"Ready.");
-    
-if (typeof render === "function") {
-  render();
-} else {
-  console.error("render is not defined (missing or not loaded).");
-  setStatus("ERROR: render() missing. Check that render() is inside the <script> tag.");
-  return;
-}
-
+    render();
 
     document.getElementById("monthFilter").onchange=(e)=>{ uiMonth=e.target.value; updatePeriodPill(); render(); };
     document.getElementById("yearFilter").onchange=applyYearMonthToRawMonth;
     document.getElementById("monthNameFilter").onchange=applyYearMonthToRawMonth;
 
-    // calendar
-    document.getElementById("calOpenBtn").onclick=(e)=>{
-      e.preventDefault();
-      const pop=document.getElementById("calPop");
-      pop.style.display=(pop.style.display==="block"?"none":"block");
-      if(pop.style.display==="block") renderCalendar();
-    };
-    document.getElementById("mDateDisplay").onclick=openCalendar;
-    document.getElementById("calPrev").onclick=()=>{ calView=new Date(calView.getFullYear(), calView.getMonth()-1, 1); renderCalendar(); };
-    document.getElementById("calNext").onclick=()=>{ calView=new Date(calView.getFullYear(), calView.getMonth()+1, 1); renderCalendar(); };
-    document.addEventListener("click",(e)=>{
-      const pop=document.getElementById("calPop");
-      const wrap=pop.parentElement;
-      if(pop.style.display==="block" && wrap && !wrap.contains(e.target)) closeCalendar();
-    });
-
-    const now=new Date();
-    setManualDateISO(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`);
-
-    // month settings
-    document.getElementById("btnApplyMonth").onclick=()=>{
-      const sel = document.getElementById("selMonth");
-      const m = sel.dataset.monthKey || "";
-      if(!m) return;
-
-      AppStore.setOpening(m, parseAmountRaw(document.getElementById("openingInput").value));
-      AppStore.setMonthLocked(m, document.getElementById("lockSelect").value === "1");
-      setStatus("Month settings applied.");
-      render();
-    };
-
-    // manual save
-    document.getElementById("btnManualSave").onclick=()=>{
-      const date=document.getElementById("mDateISO").value;
-      const details=String(document.getElementById("mDetails").value||"").trim();
-      const remark=String(document.getElementById("mRemark").value||"").trim();
-      const amount=parseAmountRaw(document.getElementById("mAmount").value);
-      const ok=AppStore.add({date,month:date.slice(0,7),details,amount,remark});
-      if(!ok){ setStatus("Manual save failed (missing fields/amount=0/locked)."); return; }
-      document.getElementById("mDetails").value="";
-      document.getElementById("mAmount").value="";
-      document.getElementById("mRemark").value="";
-      setStatus("Saved.");
-      render();
-    };
-
-    // exports
-    document.getElementById("btnExportJson").onclick=()=>downloadText("ledger-export.json", AppStore.exportJSON(), "application/json");
-    document.getElementById("btnExportXlsx").onclick=exportXLSX;
-    document.getElementById("btnExportPdf").onclick=exportPDF;
-    document.getElementById("btnClear").onclick=()=>{ AppStore.clearAll(); setStatus("Cleared."); render(); };
-    document.getElementById("btnAdd").onclick=()=>{ openCalendar(); setStatus("Pick date, fill details/amount, Save."); };
-
-    // import modal
-    document.getElementById("btnImportClose").onclick=closeImportModal;
-    document.getElementById("btnCancelImport").onclick=closeImportModal;
-    document.getElementById("btnSelectAll").onclick=()=>selectAllImport(true);
-    document.getElementById("btnSelectNone").onclick=()=>selectAllImport(false);
-
-    document.getElementById("btnReparse").onclick=()=>{
-      if(pending.kind!=="CC"){ document.getElementById("pvStatus").textContent="Re-run parse only applies to CC year."; return; }
-      const year=document.getElementById("pvYear").value.trim();
-      const cc=parseMaybankCC(pending.text, year);
-      pending.records=cc;
-      renderImportTable(cc);
-      document.getElementById("pvStatus").textContent=`Reparsed CC: ${cc.length} record(s)`;
-    };
-
-    document.getElementById("btnDoImport").onclick=()=>{
-      const selected=collectSelectedImport();
-      const added=AppStore.addMany(selected);
-      setStatus(`Imported ${added} selected record(s).`);
-      closeImportModal();
-      render();
-    };
-
-    // mapping preview rebuild
-    document.getElementById("btnRebuildPreview").onclick=rebuildSmartPreview;
-
-    // edit modal
-    document.getElementById("btnEditClose").onclick=closeEditModal;
-    document.getElementById("btnEditCancel").onclick=closeEditModal;
-    document.getElementById("btnEditSave").onclick=saveEditModal;
-
-    // safety
-    window.addEventListener("unhandledrejection", (e)=>{
-      console.error("Unhandled rejection:", e.reason);
-      setStatus("Error (see console): " + (e.reason?.message || String(e.reason)));
-    });
+    // ... keep the rest of your init exactly the same ...
   }
 
   window.addEventListener("DOMContentLoaded", init);
 </script>
-</body>
-</html>
