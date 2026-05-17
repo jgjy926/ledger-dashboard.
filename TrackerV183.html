@@ -694,18 +694,7 @@
   /***********************
    * Init wiring (keep your original init body)
    ***********************/
-  <!-- MAIN APP (your big script) -->
-<script>
-  // ✅ sanity check BEFORE your app runs (keep)
-  console.log("AppStore from app-store.js =", window.AppStore);
-  console.log("AppStore keys =", window.AppStore ? Object.keys(window.AppStore) : "MISSING");
-
-  if (!window.AppStore || typeof window.AppStore.getByMonth !== "function") {
-    document.addEventListener("DOMContentLoaded", () => {
-      const status = document.getElementById("status");
-      if (status) status.textContent = "ERROR: AppStore not loaded. Check Network tab: app-store.js must be 200 OK (not 404).";
-    });
-  }
+  
 
   /***********************
    * Base helpers (YOUR CODE)
@@ -942,6 +931,50 @@
       document.getElementById("lockSelect").value = AppStore.isMonthLocked(m) ? "1" : "0";
     }
   }
+
+  function wireDragDrop(){
+  const dz = document.getElementById("dropZone");
+  const fp = document.getElementById("filePick");
+  const bp = document.getElementById("btnPick");
+
+  if (!dz || !fp || !bp) {
+    console.error("wireDragDrop: missing elements", { dz, fp, bp });
+    return;
+  }
+
+  // Prevent browser from opening the file if dropped outside the zone
+  // (common default behavior) [2](https://web.dev/patterns/files/drag-and-drop-files/)[1](https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API/File_drag_and_drop)
+  window.addEventListener("dragover", (e) => e.preventDefault());
+  window.addEventListener("drop", (e) => e.preventDefault());
+
+  dz.addEventListener("dragover", (e) => {
+    e.preventDefault();            // required to allow drop [1](https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API/File_drag_and_drop)[3](https://stackoverflow.com/questions/8006715/drag-drop-files-into-standard-html-file-input)
+    dz.classList.add("drag");
+  });
+
+  dz.addEventListener("dragleave", () => {
+    dz.classList.remove("drag");
+  });
+
+  dz.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dz.classList.remove("drag");
+
+    const files = e.dataTransfer && e.dataTransfer.files;
+    if (files && files.length) {
+      handleFiles(files);          // <-- you already have handleFiles(fileList)
+    }
+  });
+
+  // Click button opens file picker
+  bp.addEventListener("click", () => fp.click());
+
+  // When user selects file(s) via picker
+  fp.addEventListener("change", () => {
+    if (fp.files && fp.files.length) handleFiles(fp.files);
+    fp.value = ""; // optional: allows picking the same file again
+  });
+}
 
   /***********************
    * Init wiring (YOUR EXISTING init, KEEP)
