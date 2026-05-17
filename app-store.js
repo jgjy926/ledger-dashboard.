@@ -347,3 +347,7 @@ const AppStore = (() => {
     exportState, importState
   };
 })();
+
+// ✅ BAKED: expose for HTML checks and global access.
+// const/let do not automatically create window.* properties. [1](https://github.com/self-noise/inflammation-tracker)[2](https://developers.cloudflare.com/workers/runtime-apis/handlers/fetch/)
+window.AppStore = AppStore;
