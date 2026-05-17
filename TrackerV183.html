@@ -1,0 +1,1524 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Offline Multi‑Month Ledger (v17 Smarter Import)</title>
+  <link rel="icon" href="data:," />
+
+  <style>
+    :root{
+      --bg:#0b1220; --panel:#111c33; --panel2:#0f1730; --line:#2a3552;
+      --text:#fff; --muted:rgba(255,255,255,.78);
+      --pri:#7c5cff; --good:#2de38a; --bad:#ff5c7a; --warn:#ffd24d;
+    }
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text)}
+    .wrap{max-width:1200px;margin:auto;padding:20px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .space{justify-content:space-between}
+    .right{justify-content:flex-end}
+    .muted{opacity:.85;font-size:12px}
+    .grid{display:grid;grid-template-columns:1.2fr .8fr;gap:12px}
+    @media (max-width: 980px){ .grid{grid-template-columns:1fr} }
+    .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px}
+    .hr{height:1px;background:var(--line);margin:12px 0;opacity:.9}
+    button{padding:9px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.22);background:#1b243c;color:var(--text);cursor:pointer}
+    button:hover{background:#334}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    .primary{background:var(--pri);border-color:var(--pri)}
+    .ghost{background:transparent}
+    .danger{border-color:var(--bad)}
+    .pill{display:inline-flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:999px;padding:6px 10px;background:var(--panel2);font-size:12px;opacity:.95}
+    input,select,textarea{background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:9px 10px;outline:none}
+    input:focus,select:focus,textarea:focus{border-color:var(--pri)}
+    label{font-size:12px;opacity:.85}
+    .field{display:flex;flex-direction:column;gap:6px;min-width:160px}
+
+    #monthTabs{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+    .tabBtn{padding:6px 10px;border:1px solid rgba(255,255,255,.22);border-radius:10px;background:transparent}
+    .tabBtn.active{background:var(--pri);border-color:var(--pri)}
+
+    .kpiGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
+    @media (max-width: 980px){ .kpiGrid{grid-template-columns:repeat(2,1fr)} }
+    .kpiCard{
+      border:1px solid var(--line);border-radius:16px;padding:12px;
+      background:linear-gradient(145deg, rgba(124,92,255,.18), rgba(17,28,51,1) 60%);
+      position:relative;overflow:hidden;
+    }
+    .kpiTop{display:flex;justify-content:space-between;align-items:center;position:relative;z-index:1}
+    .kpiLabel{font-size:12px;opacity:.85}
+    .kpiIcon{width:34px;height:34px;border-radius:12px;display:grid;place-items:center;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12)}
+    .kpiValue{font-size:22px;font-weight:800;margin-top:6px;position:relative;z-index:1}
+    .kpiSub{font-size:12px;opacity:.78;position:relative;z-index:1}
+    .kpiGood{color:var(--good)}
+    .kpiBad{color:var(--bad)}
+
+    .drop{border:1px dashed rgba(255,255,255,.28);border-radius:16px;padding:12px;background:var(--panel2);display:flex;justify-content:space-between;gap:10px;align-items:center}
+    .drop.drag{border-color:var(--pri);box-shadow:0 0 0 2px rgba(124,92,255,.25) inset}
+    .status{margin-top:8px;font-size:12px;opacity:.9}
+    input[type=file]{display:none}
+
+    .bar{height:10px;border-radius:999px;border:1px solid var(--line);background:rgba(255,255,255,.06);overflow:hidden}
+    .bar>div{height:100%;width:0;background:linear-gradient(90deg,var(--pri),rgba(124,92,255,.4));transition:width .15s}
+
+    .monthCard{margin-top:12px;border:1px solid rgba(255,255,255,.18);border-radius:16px;overflow:hidden}
+    .monthHd{padding:12px;background:linear-gradient(145deg, rgba(255,255,255,.05), rgba(17,28,51,1));border-bottom:1px solid var(--line)}
+    table{width:100%;border-collapse:collapse}
+    td,th{border-bottom:1px solid rgba(255,255,255,.12);padding:9px;font-size:13px;vertical-align:top}
+    th{opacity:.9;text-align:left}
+    .actions button{padding:6px 10px;border-radius:10px}
+
+    .modalMask{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
+    .modal{width:min(1100px,100%);max-height:85vh;overflow:auto;background:var(--panel2);border:1px solid var(--line);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.4);padding:14px}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    @media (max-width: 980px){ .grid2{grid-template-columns:1fr} }
+    .mini{font-size:11px;opacity:.8}
+    .sectionTitle{font-weight:800;margin:4px 0}
+
+    .calWrap{position:relative}
+    .calBtn{padding:9px 10px;border-radius:12px;border:1px solid var(--line);background:var(--panel2)}
+    .calPop{
+      position:absolute;top:46px;left:0;z-index:30;width:280px;background:var(--panel2);
+      border:1px solid var(--line);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.4);padding:10px;display:none
+    }
+    .calHdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+    .calGrid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+    .calDow{font-size:11px;opacity:.75;text-align:center;padding:4px 0}
+    .calDay{font-size:12px;text-align:center;padding:8px 0;border-radius:12px;border:1px solid var(--line);background:var(--bg);cursor:pointer}
+    .calDay:hover{border-color:var(--pri)}
+    .calDay.mutedDay{opacity:.4;cursor:default}
+    .calDay.sel{background:var(--pri);border-color:var(--pri)}
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="row space">
+      <div>
+        <h2 style="margin:0">Offline Multi‑Month Ledger (v17 Smarter Import)</h2>
+        <div class="muted">Smart CSV/XLSX mapping + date normalization (same as PDF OCR) • Select/edit before save • Month sheets export</div>
+      </div>
+      <div class="row right">
+        <span class="pill" id="periodPill">Period: All</span>
+        <span class="pill">Rule: + Debit, − Credit</span>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:12px">
+      <!-- LEFT -->
+      <div class="card">
+        <div class="row space">
+          <div class="row">
+            <button class="primary" id="btnAdd">Add Record</button>
+            <button id="btnExportXlsx">Export Excel (.xlsx)</button>
+            <button id="btnExportPdf">Export PDF</button>
+            <button id="btnExportJson">Export JSON</button>
+			<button id="btnCloudLoad">Load Cloud</button>
+			<button id="btnCloudSave">Save Cloud</button>
+
+            <button class="danger" id="btnClear">Clear</button>
+          </div>
+          <div class="muted" id="libStatus">Libs: checking…</div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div id="dropZone" class="drop">
+          <div>
+            <strong>Drop PDF / CSV / XLSX here</strong>
+            <span>Supports: .pdf, .csv, .xls, .xlsx</span>
+          </div>
+          <div class="row">
+            <button id="btnPick" class="ghost">Choose File</button>
+            <input id="filePick" type="file" accept=".pdf,.csv,.xls,.xlsx"/>
+          </div>
+        </div>
+
+        <div id="status" class="status">Ready.</div>
+
+        <div class="row" style="margin-top:8px;gap:10px">
+          <div class="bar" style="flex:1"><div id="progFill"></div></div>
+          <span class="pill" id="progText">0%</span>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="field" style="min-width:160px">
+            <label>Year</label>
+            <select id="yearFilter"></select>
+          </div>
+          <div class="field" style="min-width:160px">
+            <label>Month (MMM)</label>
+            <select id="monthNameFilter"></select>
+          </div>
+          <div class="field" style="min-width:200px">
+            <label>Month (raw)</label>
+            <select id="monthFilter"></select>
+          </div>
+        </div>
+
+        <div id="monthTabs"></div>
+
+        <div class="kpiGrid">
+          <div class="kpiCard">
+            <div class="kpiTop"><div class="kpiLabel">Total Tx</div><div class="kpiIcon">#</div></div>
+            <div class="kpiValue" id="kpiCount">0</div>
+            <div class="kpiSub">Transactions</div>
+          </div>
+          <div class="kpiCard">
+            <div class="kpiTop"><div class="kpiLabel">Debit (+)</div><div class="kpiIcon">＋</div></div>
+            <div class="kpiValue" id="kpiDebit">RM 0.00</div>
+            <div class="kpiSub">Out</div>
+          </div>
+          <div class="kpiCard">
+            <div class="kpiTop"><div class="kpiLabel">Credit (−)</div><div class="kpiIcon">−</div></div>
+            <div class="kpiValue" id="kpiCredit">RM 0.00</div>
+            <div class="kpiSub">In</div>
+          </div>
+          <div class="kpiCard">
+            <div class="kpiTop"><div class="kpiLabel">Net</div><div class="kpiIcon">Σ</div></div>
+            <div class="kpiValue" id="kpiNet">RM 0.00</div>
+            <div class="kpiSub" id="kpiNetSub"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT -->
+      <div class="card">
+        <div class="row space">
+          <b>Month Settings / Manual Entry</b>
+          <span class="muted">Calendar picker + edit all fields</span>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="field" style="flex:1;min-width:240px">
+            <label>Selected Month</label>
+            <input id="selMonth" readonly />
+          </div>
+          <div class="field" style="min-width:170px">
+            <label>Opening Balance (RM)</label>
+            <input id="openingInput" inputmode="decimal" placeholder="e.g. 1342.78" />
+          </div>
+          <div class="field" style="min-width:170px">
+            <label>Lock Month</label>
+            <select id="lockSelect">
+              <option value="0">Unlocked</option>
+              <option value="1">Locked</option>
+            </select>
+          </div>
+          <div class="field" style="min-width:140px">
+            <label>&nbsp;</label>
+            <button id="btnApplyMonth" class="primary">Apply</button>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="row">
+          <div class="field calWrap" style="min-width:240px">
+            <label>Date (calendar)</label>
+            <div class="row" style="gap:8px">
+              <input id="mDateDisplay" readonly placeholder="Select date" style="flex:1"/>
+              <button class="calBtn" id="calOpenBtn" type="button">📅</button>
+            </div>
+            <input id="mDateISO" type="hidden"/>
+            <div class="calPop" id="calPop">
+              <div class="calHdr">
+                <button class="ghost" id="calPrev" type="button">‹</button>
+                <div class="pill" id="calTitle">Month</div>
+                <button class="ghost" id="calNext" type="button">›</button>
+              </div>
+              <div class="calGrid" id="calGrid"></div>
+            </div>
+          </div>
+
+          <div class="field" style="flex:1;min-width:220px">
+            <label>Details</label>
+            <input id="mDetails" placeholder="e.g. Grocery / Transfer / Payment"/>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field" style="min-width:220px">
+            <label>Amount (RM)</label>
+            <input id="mAmount" placeholder="e.g. 10.00 or 10.00- or 5000.00+"/>
+          </div>
+          <div class="field" style="flex:1;min-width:220px">
+            <label>Remark</label>
+            <input id="mRemark" placeholder="optional"/>
+          </div>
+        </div>
+
+        <div class="row right">
+          <button id="btnManualSave" class="primary">Save Manual Entry</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="months"></div>
+  </div>
+
+  <!-- IMPORT PREVIEW (PDF + SMART CSV/XLSX) -->
+  <div class="modalMask" id="maskImport">
+    <div class="modal">
+      <div class="row space">
+        <div>
+          <b id="importTitle">Import Preview</b>
+          <div class="muted" id="importSubtitle">Select records before saving. All fields editable.</div>
+        </div>
+        <div class="row"><button class="ghost" id="btnImportClose">Close</button></div>
+      </div>
+
+      <div class="hr"></div>
+
+      <!-- SMART MAPPING (shown only for CSV/XLSX) -->
+      <div id="mapSection" style="display:none">
+        <div class="sectionTitle">Smart Mapping</div>
+        <div class="muted">Auto-detected fields. Adjust if needed, then click “Rebuild Preview”.</div>
+
+        <div class="grid2" style="margin-top:10px">
+          <div class="field">
+            <label>Sheet (XLSX only)</label>
+            <select id="mapSheet"></select>
+            <div class="mini">If this is CSV, leave as “(CSV)”.</div>
+          </div>
+          <div class="field">
+            <label>Date format</label>
+            <select id="mapDateOrder">
+              <option value="DMY" selected>DMY (e.g. 16/05/2026)</option>
+              <option value="MDY">MDY (e.g. 05/16/2026)</option>
+              <option value="YMD">YMD (e.g. 2026-05-16)</option>
+            </select>
+            <div class="mini">Used when date is a string like 1/5/2026.</div>
+          </div>
+        </div>
+
+        <div class="grid2" style="margin-top:10px">
+          <div class="field">
+            <label>Date column</label>
+            <select id="mapDateCol"></select>
+          </div>
+          <div class="field">
+            <label>Details/Description column</label>
+            <select id="mapDetailsCol"></select>
+          </div>
+          <div class="field">
+            <label>Amount column</label>
+            <select id="mapAmountCol"></select>
+            <div class="mini">Use this OR Debit+Credit. Leave “(none)” if using Debit+Credit.</div>
+          </div>
+          <div class="field">
+            <label>Debit column</label>
+            <select id="mapDebitCol"></select>
+          </div>
+          <div class="field">
+            <label>Credit column</label>
+            <select id="mapCreditCol"></select>
+          </div>
+          <div class="field">
+            <label>Remark column</label>
+            <select id="mapRemarkCol"></select>
+          </div>
+        </div>
+
+        <div class="row right" style="margin-top:10px">
+          <button class="primary" id="btnRebuildPreview">Rebuild Preview</button>
+        </div>
+
+        <div class="hr"></div>
+      </div>
+
+      <!-- PDF year controls stay -->
+      <div class="grid2" id="pdfSection">
+        <div class="field">
+          <label>Detected Type</label>
+          <input id="pvType" readonly />
+        </div>
+        <div class="field">
+          <label>Year (CC only)</label>
+          <input id="pvYear" inputmode="numeric" placeholder="e.g. 2026"/>
+          <div class="mini" id="pvYearHint"></div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:10px">
+        <button class="ghost" id="btnSelectAll">Select all</button>
+        <button class="ghost" id="btnSelectNone">Select none</button>
+        <button class="primary" id="btnReparse">Re-run parse</button>
+        <span class="pill" id="pvStatus">…</span>
+      </div>
+
+      <div class="hr"></div>
+
+      <div style="overflow:auto;border:1px solid var(--line);border-radius:14px">
+        <table id="pvTable">
+          <tr>
+            <th style="width:40px"></th>
+            <th style="min-width:130px">Date</th>
+            <th style="min-width:260px">Details</th>
+            <th style="min-width:120px">Amount</th>
+            <th style="min-width:220px">Remark</th>
+          </tr>
+        </table>
+      </div>
+
+      <div class="hr"></div>
+
+      <div class="row right">
+        <button class="ghost" id="btnCancelImport">Cancel</button>
+        <button class="primary" id="btnDoImport">Import selected</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- EDIT MODAL -->
+  <div class="modalMask" id="maskEdit">
+    <div class="modal">
+      <div class="row space">
+        <div><b>Edit Entry</b><div class="muted">Edit all fields.</div></div>
+        <div class="row"><button class="ghost" id="btnEditClose">Close</button></div>
+      </div>
+      <div class="hr"></div>
+      <div class="grid2">
+        <div class="field"><label>Date</label><input id="editDate"></div>
+        <div class="field"><label>Amount</label><input id="editAmount"></div>
+        <div class="field"><label>Details</label><input id="editDetails"></div>
+        <div class="field"><label>Remark</label><input id="editRemark"></div>
+      </div>
+      <div class="hr"></div>
+      <div class="row right">
+        <button class="ghost" id="btnEditCancel">Cancel</button>
+        <button class="primary" id="btnEditSave">Save changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LIBS -->
+  <script src="./pdf.min.js"></script>
+  <script> if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "./pdf.worker.min.js"; </script>
+  <script src="./xlsx.full.min.js"></script>
+  <script src="./tesseract/tesseract.min.js"></script>
+
+  <script>
+  /***********************
+   * Base helpers (fixed escapeHtml)
+   ***********************/
+  function setStatus(msg){ document.getElementById("status").textContent = msg; }
+  function setProgress(pct,msg){
+    document.getElementById("progFill").style.width = Math.max(0,Math.min(100,pct))+"%";
+    document.getElementById("progText").textContent = Math.round(pct)+"%";
+    if(msg) setStatus(msg);
+  }
+  function fmt(n){ return "RM " + Number(n||0).toFixed(2); }
+  function escapeHtml(s){
+    return String(s ?? "")
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#039;");
+  }
+  function parseAmountRaw(raw){
+    let s=String(raw??"").trim();
+    if(!s) return 0;
+    s=s.replace(/RM\s*/ig,"").replace(/\s+/g,"");
+    let sign=1;
+    if(/[+-]$/.test(s)){ sign=s.endsWith("-")?-1:1; s=s.slice(0,-1); }
+    if(/^\(.*\)$/.test(s)){ sign=-1; s=s.slice(1,-1); } // (123.45) => negative
+    if(/^[+-]/.test(s)){ sign=s.startsWith("-")?-1:1; s=s.slice(1); }
+    s=s.replace(/,/g,"");
+    const n=Number(s);
+    return isFinite(n)?n*sign:0;
+  }
+  function computeDebitCredit(records){
+    let debit=0, credit=0;
+    for(const r of records){ const a=Number(r.amount||0); if(a>0) debit+=a; if(a<0) credit+=Math.abs(a); }
+    return {count:records.length,debit,credit};
+  }
+
+  const MMM = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  function fmtMonthMMM(monthISO){
+    const m=String(monthISO||"").match(/^(\d{4})-(\d{2})$/);
+    if(!m) return monthISO||"";
+    const mm = Number(m[2]) - 1;
+    return `${MMM[mm] || "??"}.${m[1]}`; // <- Mar.2026
+
+  }
+  function fmtDateDDMMMYYYY(iso){
+    const m=String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(!m) return iso||"";
+    return `${m[3]}.${MMM[Number(m[2])-1]||"??"}.${m[1]}`;
+  }
+
+  function yearCandidatesFromText(s){
+    const yrs=Array.from(new Set((String(s||"").match(/\b20\d{2}\b/g)||[]).map(x=>Number(x)).filter(n=>n>=2000&&n<=2099)));
+    yrs.sort((a,b)=>a-b); return yrs;
+  }
+  function toISOFromDDMM(ddmm,year){
+    const m=String(ddmm||"").match(/^(\d{2})\/(\d{2})$/);
+    if(!m) return "";
+    if(!/^\d{4}$/.test(String(year||"").trim())) return "";
+    return `${year}-${m[2]}-${m[1]}`;
+  }
+
+  /***********************
+   * NEW: Date normalization (consistent with PDF OCR output)
+   ***********************/
+  function normalizeToISODate(val, order="DMY"){
+    if(val === null || val === undefined || val === "") return "";
+
+    // Date object (XLSX cellDates:true)
+    if(val instanceof Date && !isNaN(val.getTime())){
+      const y=val.getFullYear();
+      const m=String(val.getMonth()+1).padStart(2,"0");
+      const d=String(val.getDate()).padStart(2,"0");
+      return `${y}-${m}-${d}`;
+    }
+
+    // Excel serial number
+    if(typeof val === "number" && isFinite(val)){
+      // Excel epoch: 1899-12-30 (accounts for Excel leap-year bug)
+      const base = Date.UTC(1899, 11, 30);
+      const ms = base + Math.round(val * 86400000);
+      const d = new Date(ms);
+      if(!isNaN(d.getTime())) return d.toISOString().slice(0,10);
+      return "";
+    }
+
+    const s = String(val).trim();
+    if(!s) return "";
+
+    // ISO already
+    if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+    // 2026/05/16 or 2026.05.16
+    let m = s.match(/^(\d{4})[\/\.\-](\d{1,2})[\/\.\-](\d{1,2})$/);
+    if(m){
+      const yyyy=m[1], mm=String(m[2]).padStart(2,"0"), dd=String(m[3]).padStart(2,"0");
+      return `${yyyy}-${mm}-${dd}`;
+    }
+
+    // 16/05/2026 or 16-05-2026
+    m = s.match(/^(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{2}|\d{4})$/);
+    if(m){
+      let a=Number(m[1]), b=Number(m[2]), c=String(m[3]);
+      const yyyy = (c.length===2) ? ("20"+c) : c;
+      let dd, mm;
+      if(order==="DMY"){ dd=a; mm=b; }
+      else if(order==="MDY"){ mm=a; dd=b; }
+      else { // YMD not applicable here, fallback DMY
+        dd=a; mm=b;
+      }
+      return `${yyyy}-${String(mm).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
+    }
+
+    // Fallback Date parsing (last resort)
+    const d = new Date(s);
+    if(!isNaN(d.getTime())) return d.toISOString().slice(0,10);
+
+    return "";
+  }
+
+  /***********************
+   * Lib status
+   ***********************/
+  async function updateLibStatus(){
+    const pdfOk=!!window.pdfjsLib;
+    const xlsxOk=!!window.XLSX;
+    const ocrOk=!!window.Tesseract;
+    let workerOk=false;
+    try{ const r=await fetch("./pdf.worker.min.js",{method:"GET"}); workerOk=r.ok; }catch{}
+    document.getElementById("libStatus").textContent =
+      `Libs: PDF.js=${pdfOk?"OK":"Missing"} • worker=${workerOk?"OK":"Missing"} • XLSX=${xlsxOk?"OK":"Missing"} • OCR=${ocrOk?"OK":"Missing"}`;
+  }
+
+  /***********************
+   * OCR config resolver (keeps V15 working)
+   ***********************/
+  async function urlOk(url){
+    try{ const r=await fetch(url,{method:"GET"}); return r.ok; }catch{return false;}
+  }
+
+  async function resolveOcrConfig(){
+    const workerCandidates = [
+      new URL("./tesseract/worker.min.js", location.href).toString(),
+      new URL("./worker.min.js", location.href).toString()
+    ];
+    const langDirCandidates = [
+      new URL("./tesseract/lang-data/", location.href).toString(),
+      new URL("./lang-data/", location.href).toString(),
+      new URL("./", location.href).toString()
+    ];
+    const coreDirCandidates = [
+      new URL("./tesseract/core/", location.href).toString()
+    ];
+    const coreFileCandidates = [
+      new URL("./tesseract/core/tesseract-core.wasm.js", location.href).toString(),
+      new URL("./tesseract-core.wasm.js", location.href).toString(),
+      new URL("./tesseract/tesseract-core.wasm.js", location.href).toString()
+    ];
+
+    let workerPath=null;
+    for(const u of workerCandidates){ if(await urlOk(u)){ workerPath=u; break; } }
+
+    let langPath=null;
+    for(const dir of langDirCandidates){
+      if(await urlOk(dir+"eng.traineddata.gz")){ langPath=dir; break; }
+    }
+
+    let corePath=null;
+    for(const dir of coreDirCandidates){
+      const need=[dir+"tesseract-core.wasm.js",dir+"tesseract-core-simd.wasm.js",dir+"tesseract-core-lstm.wasm.js",dir+"tesseract-core-simd-lstm.wasm.js"];
+      const oks=await Promise.all(need.map(urlOk));
+      if(oks.every(Boolean)){ corePath=dir; break; }
+    }
+    if(!corePath){
+      for(const u of coreFileCandidates){ if(await urlOk(u)){ corePath=u; break; } }
+    }
+
+    const missing=[];
+    if(!workerPath) missing.push("worker.min.js missing");
+    if(!langPath) missing.push("eng.traineddata.gz missing");
+    if(!corePath) missing.push("tesseract core missing");
+    return {workerPath, langPath, corePath, missing};
+  }
+
+  /***********************
+   * AppStore
+   ***********************/
+  const AppStore = (() => {
+    const KEY_TX="ott_tx_v2", KEY_OPEN="ott_opening_v2", KEY_LOCK="ott_lock_v2";
+    const _load=(k,f)=>{ try{const r=localStorage.getItem(k); return r?JSON.parse(r):f;}catch{return f;}};
+    const _save=(k,v)=>localStorage.setItem(k, JSON.stringify(v));
+    const _id=()=> "tx_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,9);
+    const _monthKey=(d)=>String(d||"").slice(0,7);
+    const _norm=(r)=>{
+      const date=String(r.date||"").slice(0,10);
+      let amount=Number(r.amount||0); if(!isFinite(amount)) amount=0;
+      const month=r.month||_monthKey(date);
+      return {id:r.id||_id(), date, month, details:String(r.details||"").trim(), amount, remark:String(r.remark||"").trim()};
+    };
+    const getAll=()=>_load(KEY_TX,[]).map(_norm);
+    const getById=(id)=>getAll().find(x=>x.id===id)||null;
+    const getByMonth=()=>{
+      const arr=getAll(); const map={};
+      for(const r of arr){ if(!map[r.month]) map[r.month]=[]; map[r.month].push(r); }
+      for(const m of Object.keys(map)) map[m].sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+      return Object.fromEntries(Object.entries(map).sort((a,b)=>a[0].localeCompare(b[0])));
+    };
+    const isMonthLocked=(month)=>Boolean((_load(KEY_LOCK,{}))[month]);
+    const setMonthLocked=(month,locked)=>{ const m=_load(KEY_LOCK,{}); m[month]=Boolean(locked); _save(KEY_LOCK,m); };
+    const getOpening=(month)=>{ const m=_load(KEY_OPEN,{}); const v=Number(m[month]??0); return isFinite(v)?v:0; };
+    const setOpening=(month,val)=>{ const m=_load(KEY_OPEN,{}); m[month]=Number(val||0); _save(KEY_OPEN,m); };
+    const add=(record)=>{
+      const arr=_load(KEY_TX,[]).map(_norm);
+      const rec=_norm(record);
+      if(!rec.date||!rec.details||rec.amount===0) return false;
+      if(isMonthLocked(rec.month)) return false;
+      arr.push(rec); _save(KEY_TX,arr); return true;
+    };
+    const addMany=(records)=>{
+      const arr=_load(KEY_TX,[]).map(_norm); let added=0;
+      for(const r of records||[]){
+        const rec=_norm(r);
+        if(!rec.date||!rec.details||rec.amount===0) continue;
+        if(isMonthLocked(rec.month)) continue;
+        arr.push(rec); added++;
+      }
+      _save(KEY_TX,arr); return added;
+    };
+    const update=(id,patch)=>{
+      const arr=_load(KEY_TX,[]).map(_norm);
+      const idx=arr.findIndex(x=>x.id===id); if(idx<0) return false;
+      const next=_norm({...arr[idx],...patch,id});
+      if(isMonthLocked(next.month)) return false;
+      arr[idx]=next; _save(KEY_TX,arr); return true;
+    };
+    const remove=(id)=>{
+      const arr=_load(KEY_TX,[]).map(_norm);
+      const rec=arr.find(x=>x.id===id);
+      if(rec && isMonthLocked(rec.month)) return false;
+      _save(KEY_TX,arr.filter(x=>x.id!==id)); return true;
+    };
+    const clearAll=()=>{ localStorage.removeItem(KEY_TX); localStorage.removeItem(KEY_OPEN); localStorage.removeItem(KEY_LOCK); };
+    const getMonthLedger=(month)=>{
+      const map=getByMonth(); const months=Object.keys(map);
+      let opening=getOpening(month);
+      if(!opening){ const idx=months.indexOf(month); if(idx>0) opening=getMonthLedger(months[idx-1]).closing; }
+      let debit=0, credit=0, running=opening;
+      const rows=(map[month]||[]).map(r=>{
+        const amt=Number(r.amount||0);
+        if(amt>0) debit+=amt;
+        if(amt<0) credit+=Math.abs(amt);
+        running+=amt;
+        return {...r, running};
+      });
+      return {month, opening, debit, credit, net: credit-debit, closing: running, rows};
+    };
+    const getAllMonthLedgers=()=>{ const map=getByMonth(); return Object.keys(map).map(m=>getMonthLedger(m)); };
+    const getStatsAll=()=>{
+      const ledgers=getAllMonthLedgers();
+      let count=0,totalDebit=0,totalCredit=0;
+      for(const l of ledgers){ count+=l.rows.length; totalDebit+=l.debit; totalCredit+=l.credit; }
+      return {count,totalDebit,totalCredit,net: totalCredit-totalDebit};
+    };
+    const exportJSON=()=>JSON.stringify(getAll(),null,2);
+    return {getAll,getById,getByMonth,add,addMany,update,remove,clearAll,getOpening,setOpening,isMonthLocked,setMonthLocked,getMonthLedger,getAllMonthLedgers,getStatsAll,exportJSON};
+  })();
+
+  /***********************
+   * Calendar picker
+   ***********************/
+  let calView=new Date();
+  function openCalendar(){ document.getElementById("calPop").style.display="block"; renderCalendar(); }
+  function closeCalendar(){ document.getElementById("calPop").style.display="none"; }
+  function setManualDateISO(iso){
+    document.getElementById("mDateISO").value=iso;
+    document.getElementById("mDateDisplay").value=fmtDateDDMMMYYYY(iso);
+    closeCalendar();
+  }
+  function renderCalendar(){
+    const year=calView.getFullYear(), month=calView.getMonth();
+    document.getElementById("calTitle").textContent=`${MMM[month]} ${year}`;
+    const grid=document.getElementById("calGrid"); grid.innerHTML="";
+    const dows=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+    dows.forEach(d=>{ const el=document.createElement("div"); el.className="calDow"; el.textContent=d; grid.appendChild(el); });
+    const first=new Date(year,month,1);
+    const last=new Date(year,month+1,0);
+    const days=last.getDate();
+    const startDow=(first.getDay()+6)%7;
+    const prevLast=new Date(year,month,0).getDate();
+    for(let i=0;i<startDow;i++){
+      const el=document.createElement("div"); el.className="calDay mutedDay";
+      el.textContent=String(prevLast-startDow+i+1); grid.appendChild(el);
+    }
+    const selected=document.getElementById("mDateISO").value;
+    for(let d=1; d<=days; d++){
+      const iso=`${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+      const el=document.createElement("div"); el.className="calDay"+(selected===iso?" sel":""); el.textContent=String(d);
+      el.onclick=()=>setManualDateISO(iso);
+      grid.appendChild(el);
+    }
+  }
+
+  /***********************
+   * OCR worker (same as v15)
+   ***********************/
+  let ocrWorker=null;
+  async function initOcrWorker(){
+    if(ocrWorker) return ocrWorker;
+    if(!window.Tesseract) throw new Error("Tesseract not loaded");
+    const cfg = await resolveOcrConfig();
+    if(cfg.missing.length){
+      console.error("OCR missing:", cfg.missing);
+      setStatus("OCR assets missing: " + cfg.missing.join(" | "));
+      throw new Error("OCR assets missing.");
+    }
+    try{
+      ocrWorker = await Tesseract.createWorker("eng", 1, {
+        workerPath: cfg.workerPath,
+        langPath: cfg.langPath,
+        corePath: cfg.corePath
+      });
+    }catch{
+      ocrWorker = await Tesseract.createWorker({
+        workerPath: cfg.workerPath,
+        langPath: cfg.langPath,
+        corePath: cfg.corePath
+      });
+      if(ocrWorker.load) await ocrWorker.load();
+      if(ocrWorker.loadLanguage) await ocrWorker.loadLanguage("eng");
+      if(ocrWorker.initialize) await ocrWorker.initialize("eng");
+    }
+    return ocrWorker;
+  }
+
+  /***********************
+   * PDF + OCR flow
+   ***********************/
+  async function pdfExtractText(file){
+    const buf=await file.arrayBuffer();
+    const doc=await pdfjsLib.getDocument({data:buf}).promise;
+    let out="";
+    for(let p=1;p<=doc.numPages;p++){
+      const page=await doc.getPage(p);
+      const tc=await page.getTextContent({normalizeWhitespace:true, disableCombineTextItems:false});
+      const joined=(tc.items||[]).map(it=>(it.str||"").trim()).filter(Boolean).join(" ");
+      out += joined + "\n";
+    }
+    return {text: out.replace(/\s+/g," ").trim(), pages: doc.numPages};
+  }
+
+  async function ocrPdfToText(file){
+    const buf=await file.arrayBuffer();
+    const doc=await pdfjsLib.getDocument({data:buf}).promise;
+    const worker=await initOcrWorker();
+    let allText="";
+    for(let p=1;p<=doc.numPages;p++){
+      setProgress((p-1)/doc.numPages*100,`Rendering page ${p}/${doc.numPages}…`);
+      const page=await doc.getPage(p);
+      const viewport=page.getViewport({scale:2});
+      const canvas=document.createElement("canvas");
+      const ctx=canvas.getContext("2d");
+      canvas.width=Math.floor(viewport.width);
+      canvas.height=Math.floor(viewport.height);
+      await page.render({canvasContext:ctx,viewport}).promise;
+      setProgress((p-0.5)/doc.numPages*100,`OCR page ${p}/${doc.numPages}…`);
+      const res=await worker.recognize(canvas);
+      allText += "\n" + (res?.data?.text||"") + "\n";
+    }
+    setProgress(100,"OCR complete.");
+    return allText.replace(/\s+/g," ").trim();
+  }
+
+  function parseMaybankCC(text, year){
+    const re=/(\d{2}\/\d{2})\s+(\d{2}\/\d{2})\s+(.+?)\s+(\d{1,3}(?:,\d{3})*\.\d{2})(?=\s+\d{2}\/\d{2}\s+\d{2}\/\d{2}|\s+TOTAL|\s+SUB\s+TOTAL|$)/gis;
+    const recs=[]; let m;
+    while((m=re.exec(text))!==null){
+      const iso=toISOFromDDMM(m[2],year);
+      if(!iso) continue;
+      const details=m[3].replace(/\s+/g," ").trim();
+      const amount=parseAmountRaw(m[4]);
+      if(details && amount!==0) recs.push({date:iso,month:iso.slice(0,7),details,amount,remark:"Imported: CC"});
+    }
+    return recs;
+  }
+  function parseMaybankSavings(text){
+    const re=/(\d{2}\/\d{2}\/\d{2})\s+(.+?)\s+([0-9,]+\.\d{2}[+-])\s+([0-9,]+\.\d{2})/gis;
+    const recs=[]; let m;
+    while((m=re.exec(text))!==null){
+      const ddmmyy=m[1];
+      const mm=ddmmyy.slice(3,5), dd=ddmmyy.slice(0,2), yy=ddmmyy.slice(6,8);
+      const iso=`20${yy}-${mm}-${dd}`;
+      const details=m[2].replace(/\s+/g," ").trim();
+      const amount=-parseAmountRaw(m[3]);
+      if(details && amount!==0) recs.push({date:iso,month:iso.slice(0,7),details,amount,remark:"Imported: Savings"});
+    }
+    return recs;
+  }
+
+  /***********************
+   * SMART IMPORT: CSV/XLSX
+   ***********************/
+  let smartImportState = null; // {type:'csv'|'xlsx', file, sheetNames, activeSheet, headers, rows, mapping, dateOrder}
+  function lower(s){ return String(s||"").toLowerCase(); }
+
+  function guessMapping(headers){
+    const score = (h, keys)=> keys.some(k=>h.includes(k)) ? 1 : 0;
+    const hLow=headers.map(h=>lower(h));
+
+    const pickBest = (keys) => {
+      let best = "(none)", bestScore = 0;
+      for(let i=0;i<hLow.length;i++){
+        const sc = score(hLow[i], keys);
+        if(sc>bestScore){ bestScore=sc; best=headers[i]; }
+      }
+      return best;
+    };
+
+    const dateCol = pickBest(["date","tarikh","posting date","transaction date"]);
+    const detailsCol = pickBest(["details","detail","description","desc","merchant","particular","butiran","narration"]);
+    const remarkCol = pickBest(["remark","notes","note","catatan","reference","ref"]);
+
+    // amount vs debit/credit detection
+    const debitCol = pickBest(["debit","dr","withdrawal","out"]);
+    const creditCol = pickBest(["credit","cr","deposit","in"]);
+    const amountCol = pickBest(["amount","amt","value","rm","jumlah","transaction amount"]);
+
+    // if debit/credit both exist strongly, prefer them and set amount none
+    const hasDC = debitCol!=="(none)" && creditCol!=="(none)";
+    return {
+      dateCol: dateCol!=="(none)"?dateCol:"(none)",
+      detailsCol: detailsCol!=="(none)"?detailsCol:"(none)",
+      remarkCol: remarkCol!=="(none)"?remarkCol:"(none)",
+      amountCol: hasDC ? "(none)" : (amountCol!=="(none)"?amountCol:"(none)"),
+      debitCol: debitCol!=="(none)"?debitCol:"(none)",
+      creditCol: creditCol!=="(none)"?creditCol:"(none)"
+    };
+  }
+
+  function populateMapDropdown(selectId, headers, allowNone=true){
+    const sel=document.getElementById(selectId);
+    sel.innerHTML = (allowNone?`<option value="(none)">(none)</option>`:"") + headers.map(h=>`<option value="${escapeHtml(h)}">${escapeHtml(h)}</option>`).join("");
+  }
+
+  function applyMappingToUI(mapping){
+    const setVal=(id,v)=>{ const el=document.getElementById(id); if(el){ el.value = v || "(none)"; } };
+    setVal("mapDateCol", mapping.dateCol);
+    setVal("mapDetailsCol", mapping.detailsCol);
+    setVal("mapRemarkCol", mapping.remarkCol);
+    setVal("mapAmountCol", mapping.amountCol);
+    setVal("mapDebitCol", mapping.debitCol);
+    setVal("mapCreditCol", mapping.creditCol);
+  }
+
+  function buildRecordsFromMapping(rows, mapping, dateOrder){
+    const recs=[];
+    for(const row of rows){
+      const dateRaw = mapping.dateCol==="(none)" ? "" : row[mapping.dateCol];
+      const dateISO = normalizeToISODate(dateRaw, dateOrder);
+      const details = mapping.detailsCol==="(none)" ? "" : String(row[mapping.detailsCol]??"").trim();
+      const remark = mapping.remarkCol==="(none)" ? "" : String(row[mapping.remarkCol]??"").trim();
+
+      let amount = 0;
+      if(mapping.amountCol && mapping.amountCol!=="(none)"){
+        amount = parseAmountRaw(row[mapping.amountCol]);
+      }else{
+        const d = mapping.debitCol && mapping.debitCol!=="(none)" ? parseAmountRaw(row[mapping.debitCol]) : 0;
+        const c = mapping.creditCol && mapping.creditCol!=="(none)" ? parseAmountRaw(row[mapping.creditCol]) : 0;
+        // Convention: debit positive, credit negative (internal)
+        amount = d - c;
+      }
+
+      if(!dateISO || !details || amount===0) continue;
+      recs.push({
+        date: dateISO,
+        month: dateISO.slice(0,7),
+        details,
+        amount,
+        remark
+      });
+    }
+    // sort old->new
+    recs.sort((a,b)=> (a.month||"").localeCompare(b.month||"") || (a.date||"").localeCompare(b.date||""));
+    return recs;
+  }
+
+  function openSmartImportWizard(kind, payload){
+    // kind: 'csv' | 'xlsx'
+    // payload: {rows, headers, sheetNames?, activeSheet?}
+    smartImportState = {
+      kind,
+      rows: payload.rows,
+      headers: payload.headers,
+      sheetNames: payload.sheetNames || ["(CSV)"],
+      activeSheet: payload.activeSheet || "(CSV)",
+      dateOrder: "DMY",
+      mapping: guessMapping(payload.headers)
+    };
+
+    // show mapping section, hide pdf section
+    document.getElementById("mapSection").style.display="block";
+    document.getElementById("pdfSection").style.display="none";
+    document.getElementById("btnReparse").style.display="none"; // not for csv/xlsx
+    document.getElementById("pvYear").value = "";
+
+    document.getElementById("importTitle").textContent = "Import Preview (Smart " + (kind==="xlsx"?"XLSX":"CSV") + ")";
+    document.getElementById("importSubtitle").textContent = "Map columns → rebuild preview → select/edit rows → import.";
+
+    // sheet selector
+    const mapSheet=document.getElementById("mapSheet");
+    mapSheet.innerHTML = smartImportState.sheetNames.map(s=>`<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("");
+    mapSheet.value = smartImportState.activeSheet;
+    mapSheet.disabled = (kind!=="xlsx");
+
+    // populate mapping dropdowns
+    populateMapDropdown("mapDateCol", smartImportState.headers, false);
+    populateMapDropdown("mapDetailsCol", smartImportState.headers, false);
+    populateMapDropdown("mapRemarkCol", smartImportState.headers, true);
+    populateMapDropdown("mapAmountCol", smartImportState.headers, true);
+    populateMapDropdown("mapDebitCol", smartImportState.headers, true);
+    populateMapDropdown("mapCreditCol", smartImportState.headers, true);
+
+    applyMappingToUI(smartImportState.mapping);
+
+    // Build initial preview
+    rebuildSmartPreview();
+    document.getElementById("maskImport").style.display="flex";
+  }
+
+  function rebuildSmartPreview(){
+    if(!smartImportState) return;
+
+    // read mapping from UI
+    const mapping = {
+      dateCol: document.getElementById("mapDateCol").value,
+      detailsCol: document.getElementById("mapDetailsCol").value,
+      remarkCol: document.getElementById("mapRemarkCol").value,
+      amountCol: document.getElementById("mapAmountCol").value,
+      debitCol: document.getElementById("mapDebitCol").value,
+      creditCol: document.getElementById("mapCreditCol").value
+    };
+    const dateOrder = document.getElementById("mapDateOrder").value || "DMY";
+    smartImportState.mapping = mapping;
+    smartImportState.dateOrder = dateOrder;
+
+    const recs = buildRecordsFromMapping(smartImportState.rows, mapping, dateOrder);
+
+    // store in pending (reuse import preview flow)
+    pending = {kind: smartImportState.kind.toUpperCase(), text:"", records: recs, years: []};
+    document.getElementById("pvType").value = pending.kind;
+    document.getElementById("pvStatus").textContent = `Built ${recs.length} record(s) from mapping`;
+    renderImportTable(recs);
+  }
+
+  /***********************
+   * Import preview modal (shared)
+   ***********************/
+  let pending = {kind:"", text:"", records:[], years:[]};
+
+  function openImportModal(kind, text, records, years, yearPrefill){
+    smartImportState = null;
+    document.getElementById("mapSection").style.display="none";
+    document.getElementById("pdfSection").style.display="grid";
+    document.getElementById("btnReparse").style.display="inline-block";
+
+    pending={kind,text,records,years};
+    document.getElementById("pvType").value = kind;
+    document.getElementById("pvYear").value = yearPrefill || "";
+    document.getElementById("pvYear").disabled = (kind!=="CC");
+    document.getElementById("pvYearHint").textContent = (kind==="CC")
+      ? (years.length ? `Year candidates: ${years.join(", ")}` : "Enter year manually.")
+      : "Not required";
+    document.getElementById("pvStatus").textContent = `Parsed ${records.length} record(s)`;
+    renderImportTable(records);
+    document.getElementById("maskImport").style.display="flex";
+  }
+
+  function closeImportModal(){
+    document.getElementById("maskImport").style.display="none";
+    pending={kind:"", text:"", records:[], years:[]};
+    smartImportState=null;
+  }
+
+  function renderImportTable(records){
+    const tbl=document.getElementById("pvTable");
+    tbl.innerHTML = `
+      <tr>
+        <th style="width:40px"></th>
+        <th style="min-width:130px">Date</th>
+        <th style="min-width:260px">Details</th>
+        <th style="min-width:120px">Amount</th>
+        <th style="min-width:220px">Remark</th>
+      </tr>`;
+    records.slice(0, 2000).forEach((r,idx)=>{
+      const tr=document.createElement("tr");
+      tr.innerHTML=`
+        <td><input type="checkbox" class="pvChk" data-idx="${idx}" checked></td>
+        <td><input class="pvDate" data-idx="${idx}" value="${escapeHtml(r.date)}" style="width:130px"></td>
+        <td><input class="pvDetails" data-idx="${idx}" value="${escapeHtml(r.details)}" style="width:100%"></td>
+        <td><input class="pvAmount" data-idx="${idx}" value="${escapeHtml(String(r.amount))}" style="width:120px"></td>
+        <td><input class="pvRemark" data-idx="${idx}" value="${escapeHtml(r.remark||"")}" style="width:100%"></td>
+      `;
+      tbl.appendChild(tr);
+    });
+  }
+
+  function selectAllImport(flag){
+    document.querySelectorAll(".pvChk").forEach(chk=>chk.checked=flag);
+  }
+
+  function collectSelectedImport(){
+    const recs=pending.records.map(r=>({...r}));
+    document.querySelectorAll(".pvDate").forEach(inp=>{
+      const i=Number(inp.dataset.idx);
+      if(!recs[i]) return;
+      recs[i].date=String(inp.value||"").slice(0,10);
+      recs[i].month=recs[i].date.slice(0,7);
+    });
+    document.querySelectorAll(".pvDetails").forEach(inp=>{
+      const i=Number(inp.dataset.idx);
+      if(!recs[i]) return;
+      recs[i].details=String(inp.value||"").trim();
+    });
+    document.querySelectorAll(".pvAmount").forEach(inp=>{
+      const i=Number(inp.dataset.idx);
+      if(!recs[i]) return;
+      recs[i].amount=parseAmountRaw(inp.value);
+    });
+    document.querySelectorAll(".pvRemark").forEach(inp=>{
+      const i=Number(inp.dataset.idx);
+      if(!recs[i]) return;
+      recs[i].remark=String(inp.value||"").trim();
+    });
+
+    const selectedIdx=new Set();
+    document.querySelectorAll(".pvChk").forEach(chk=>{ if(chk.checked) selectedIdx.add(Number(chk.dataset.idx)); });
+
+    return recs.filter((_,i)=>selectedIdx.has(i)).filter(r=>r.date && r.details && r.amount!==0);
+  }
+
+  /***********************
+   * Edit modal
+   ***********************/
+  let editingId=null;
+  function openEditModal(record){
+    editingId=record.id;
+    document.getElementById("editDate").value=record.date||"";
+    document.getElementById("editDetails").value=record.details||"";
+    document.getElementById("editAmount").value=String(record.amount??"");
+    document.getElementById("editRemark").value=record.remark||"";
+    document.getElementById("maskEdit").style.display="flex";
+  }
+  function closeEditModal(){ document.getElementById("maskEdit").style.display="none"; editingId=null; }
+  function saveEditModal(){
+    if(!editingId) return;
+    const r=AppStore.getById(editingId);
+    if(!r) return;
+    if(AppStore.isMonthLocked(r.month)){ setStatus("Edit blocked: month locked."); closeEditModal(); return; }
+    const date=String(document.getElementById("editDate").value||"").slice(0,10);
+    const details=String(document.getElementById("editDetails").value||"").trim();
+    const amount=parseAmountRaw(document.getElementById("editAmount").value);
+    const remark=String(document.getElementById("editRemark").value||"").trim();
+    const ok=AppStore.update(editingId,{date,month:date.slice(0,7),details,amount,remark});
+    setStatus(ok?"Updated.":"Update failed.");
+    closeEditModal();
+    render();
+  }
+
+  /***********************
+   * Rendering
+   ***********************/
+  let uiMonth="ALL";
+  function updatePeriodPill(){
+    document.getElementById("periodPill").textContent = (uiMonth==="ALL") ? "Period: All" : ("Period: " + fmtMonthMMM(uiMonth));
+  }
+  function buildYearMonthFilters(monthKeys){
+    const years = Array.from(new Set(monthKeys.map(m=>m.slice(0,4)))).sort();
+    document.getElementById("yearFilter").innerHTML = `<option value="ALL">ALL</option>` + years.map(y=>`<option value="${y}">${y}</option>`).join("");
+    document.getElementById("monthNameFilter").innerHTML = `<option value="ALL">ALL</option>` + MMM.map((m,i)=>`<option value="${String(i+1).padStart(2,"0")}">${m}</option>`).join("");
+  }
+  function applyYearMonthToRawMonth(){
+    const rawSel=document.getElementById("monthFilter");
+    const year=document.getElementById("yearFilter").value;
+    const mm=document.getElementById("monthNameFilter").value;
+    if(year==="ALL" || mm==="ALL") return;
+    const target=`${year}-${mm}`;
+    const opt=Array.from(rawSel.options).find(o=>o.value===target);
+    if(opt){ rawSel.value=target; uiMonth=target; updatePeriodPill(); render(); }
+    else setStatus(`No data for ${fmtMonthMMM(target)} yet.`);
+  }
+  function renderTabs(months){
+    const t=document.getElementById("monthTabs");
+    t.innerHTML="";
+    const add=(m)=>{
+      const b=document.createElement("button");
+      b.className="tabBtn"+(uiMonth===m?" active":"");
+      b.textContent = (m === "ALL") ? "ALL" : fmtMonthMMM(m);
+      b.onclick=()=>{ uiMonth=m; document.getElementById("monthFilter").value=m; updatePeriodPill(); render(); };
+      t.appendChild(b);
+    };
+    add("ALL"); months.forEach(add);
+  }
+
+  function render(){
+    const map=AppStore.getByMonth();
+    const months=Object.keys(map);
+    if(!months.includes(uiMonth) && uiMonth!=="ALL") uiMonth="ALL";
+
+    document.getElementById("monthFilter").innerHTML =
+    "<option value='ALL'>ALL</option>" +
+    months.map(m => `<option value="${m}">${fmtMonthMMM(m)}</option>`).join("");
+
+    document.getElementById("monthFilter").value=uiMonth;
+
+    buildYearMonthFilters(months);
+    updatePeriodPill();
+    renderTabs(months);
+
+    const s=(uiMonth==="ALL")?AppStore.getStatsAll():(()=>{const L=AppStore.getMonthLedger(uiMonth);return{count:L.rows.length,totalDebit:L.debit,totalCredit:L.credit,net:L.net};})();
+    document.getElementById("kpiCount").textContent=String(s.count);
+    document.getElementById("kpiDebit").textContent=fmt(s.totalDebit);
+    document.getElementById("kpiCredit").textContent=fmt(s.totalCredit);
+    document.getElementById("kpiNet").textContent=fmt(s.net);
+    document.getElementById("kpiNet").className="kpiValue " + (s.net>=0?"kpiGood":"kpiBad");
+    document.getElementById("kpiNetSub").textContent=(s.net>=0?"Net positive":"Net negative");
+
+    const root=document.getElementById("months");
+    root.innerHTML="";
+    const ledgers=AppStore.getAllMonthLedgers().filter(x=>uiMonth==="ALL"?true:x.month===uiMonth);
+
+    for(const L of ledgers){
+      const div=document.createElement("div");
+      div.className="monthCard";
+      div.innerHTML=`
+        <div class="monthHd"><b>${fmtMonthMMM(L.month)}</b>
+          &nbsp; Opening ${fmt(L.opening)} &nbsp; Debit ${fmt(L.debit)} &nbsp; Credit ${fmt(L.credit)} &nbsp; Closing ${fmt(L.closing)}
+          ${AppStore.isMonthLocked(L.month)?`<span class="pill" style="margin-left:10px">Locked</span>`:""}
+        </div>
+        <table>
+          <tr><th>Date</th><th>Details</th><th>Amount</th><th>Running</th><th>Remark</th><th>Actions</th></tr>
+          ${L.rows.map(r=>`
+            <tr>
+              <td>${escapeHtml(r.date)}</td>
+              <td>${escapeHtml(r.details)}</td>
+              <td>${escapeHtml(String(r.amount))}</td>
+              <td>${Number(r.running||0).toFixed(2)}</td>
+              <td>${escapeHtml(r.remark||"")}</td>
+              <td class="actions">
+                <button class="ghost" data-act="edit" data-id="${r.id}">Edit</button>
+                <button class="ghost danger" data-act="del" data-id="${r.id}">Del</button>
+              </td>
+            </tr>`).join("")}
+        </table>`;
+      div.querySelectorAll("button[data-act]").forEach(btn=>{
+        btn.onclick=()=>{
+          const id=btn.getAttribute("data-id");
+          const act=btn.getAttribute("data-act");
+          if(act==="del"){
+            const rr=AppStore.getById(id);
+            if(rr && AppStore.isMonthLocked(rr.month)){ setStatus("Delete blocked: month locked."); return; }
+            if(confirm("Delete this entry?")){ AppStore.remove(id); render(); }
+          } else {
+            const rr=AppStore.getById(id);
+            if(rr) openEditModal(rr);
+          }
+        };
+      });
+      root.appendChild(div);
+    }
+
+    const m = (uiMonth === "ALL") ? (months[0] || "") : uiMonth;
+
+    const sel = document.getElementById("selMonth");
+    sel.dataset.monthKey = m || "";                 // keep true key here
+    sel.value = m ? fmtMonthMMM(m) : "(none)";      // display only
+
+if(m){
+  document.getElementById("openingInput").value = String(AppStore.getOpening(m) || "");
+  document.getElementById("lockSelect").value = AppStore.isMonthLocked(m) ? "1" : "0";
+}
+
+    if(m){
+      document.getElementById("openingInput").value = String(AppStore.getOpening(m)||"");
+      document.getElementById("lockSelect").value = AppStore.isMonthLocked(m) ? "1":"0";
+    }
+  }
+
+  /***********************
+   * Export
+   ***********************/
+  function exportXLSX(){
+    if(!window.XLSX){ setStatus("xlsx.full.min.js not loaded."); return; }
+    const ledgers = (uiMonth==="ALL") ? AppStore.getAllMonthLedgers() : [AppStore.getMonthLedger(uiMonth)];
+    const wb = XLSX.utils.book_new();
+    const summary = ledgers.map(L=>({Month:L.month, Opening:L.opening, Debit:L.debit, Credit:L.credit, Closing:L.closing, TxCount:L.rows.length}));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), "Summary");
+    for(const L of ledgers){
+      const aoa=[];
+      aoa.push([L.month]);
+      aoa.push(["Transaction Report"]);
+      aoa.push([`Month: ${L.month}`]);
+      aoa.push([]);
+      aoa.push(["Date","Details","Debit (+)","Credit (-)","Running Balance","Remark"]);
+      aoa.push(["Opening Balance","","","","",L.opening]);
+      for(const r of L.rows){
+        const debit = r.amount>0 ? r.amount : "";
+        const credit = r.amount<0 ? Math.abs(r.amount) : "";
+        aoa.push([r.date, r.details, debit===""?"":Number(debit), credit===""?"":Number(credit), Number(r.running||0), r.remark||""]);
+      }
+      aoa.push(["TOTALS","",Number(L.debit||0),Number(L.credit||0),"",""]);
+      aoa.push(["CLOSING","","","","",Number(L.closing||0)]);
+      const ws=XLSX.utils.aoa_to_sheet(aoa);
+      ws["!cols"]=[{wch:12},{wch:28},{wch:12},{wch:12},{wch:16},{wch:20}];
+      XLSX.utils.book_append_sheet(wb, ws, L.month);
+    }
+    XLSX.writeFile(wb, uiMonth==="ALL" ? "ledger_breakdown_all_months.xlsx" : `ledger_${uiMonth}.xlsx`);
+    setStatus("Exported Excel with month sheets.");
+  }
+
+  function exportPDF(){
+    const ledgers=(uiMonth==="ALL")?AppStore.getAllMonthLedgers():[AppStore.getMonthLedger(uiMonth)];
+    const html = `
+<!doctype html><html><head><meta charset="utf-8"/>
+<title>Ledger Report</title>
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;margin:22px;color:#111}
+  h2{margin:0 0 6px 0}
+  .muted{color:#555;font-size:12px;margin-bottom:10px}
+  .month{margin-top:14px;border:1px solid #ddd;border-radius:12px;overflow:hidden}
+  .hd{background:#f6f6ff;padding:10px;border-bottom:1px solid #ddd;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  table{width:100%;border-collapse:collapse}
+  th,td{border-bottom:1px solid #eee;padding:8px;font-size:12px;text-align:left;vertical-align:top}
+  th{background:#fafafa}
+  .right{text-align:right}
+  .total{padding:10px;background:#fafafa;display:flex;justify-content:flex-end;font-weight:700}
+  @media print{ .noPrint{display:none} }
+</style></head><body>
+<div class="noPrint" style="margin-bottom:10px"><button onclick="window.print()">Print / Save as PDF</button></div>
+<h2>Offline Ledger Report</h2>
+<div class="muted">Date / Details / Amount / Remark + Total.</div>
+${ledgers.map(L=>`
+  <div class="month">
+    <div class="hd">
+      <div><b>${L.month} (${fmtMonthMMM(L.month)})</b></div>
+      <div>Opening RM ${Number(L.opening||0).toFixed(2)} • Closing RM ${Number(L.closing||0).toFixed(2)}</div>
+    </div>
+    <table>
+      <tr><th>Date</th><th>Details</th><th class="right">Amount</th><th>Remark</th></tr>
+      ${L.rows.map(r=>`
+        <tr>
+          <td>${escapeHtml(r.date)}</td>
+          <td>${escapeHtml(r.details)}</td>
+          <td class="right">${(r.amount<0?"-RM":"RM")+Math.abs(r.amount).toFixed(2)}</td>
+          <td>${escapeHtml(r.remark||"")}</td>
+        </tr>`).join("")}
+    </table>
+    <div class="total">Total RM ${Number((L.debit||0)-(L.credit||0)).toFixed(2)}</div>
+  </div>`).join("")}
+</body></html>`;
+    const w=window.open("","_blank");
+    w.document.open(); w.document.write(html); w.document.close();
+    setStatus("Opened printable report. Print to save as PDF.");
+  }
+
+  function downloadText(filename, text, mime){
+    const blob=new Blob([text],{type:mime||"text/plain;charset=utf-8"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a");
+    a.href=url; a.download=filename;
+    document.body.appendChild(a);
+    a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  /***********************
+   * PDF handler (unchanged)
+   ***********************/
+  async function handlePdf(file){
+    await updateLibStatus();
+    setProgress(5,"Extracting PDF text layer…");
+    const {text,pages} = await pdfExtractText(file);
+    let finalText=text;
+    if(!finalText || finalText.length<20){
+      setProgress(5,`No text layer. OCR (${pages} pages)…`);
+      finalText = await ocrPdfToText(file);
+    }
+    if(!finalText || finalText.length<20){
+      setProgress(0,"No text after OCR."); return;
+    }
+    const years=yearCandidatesFromText(finalText);
+    const prefill=(years.length===1)?String(years[0]):"";
+    const sav=parseMaybankSavings(finalText);
+    const cc=parseMaybankCC(finalText,prefill);
+    if(sav.length>=2 && sav.length>=cc.length){
+      openImportModal("SAVINGS", finalText, sav, years, "");
+      setProgress(100, "Parsed savings statement. Review & import.");
+    } else {
+      openImportModal("CC", finalText, cc, years, prefill);
+      setProgress(100, "Parsed credit card statement. Review & import.");
+    }
+  }
+
+  /***********************
+   * CSV/XLSX handlers (V17 smarter import)
+   ***********************/
+  async function parseCSVToRows(file){
+    const text=await file.text();
+    const lines=text.split(/\r?\n/).filter(l=>l.trim().length);
+    if(!lines.length) return {headers:[], rows:[]};
+
+    // naive CSV split (works for your typical export; for quoted commas, use XLSX route)
+    const first = lines[0].split(",").map(s=>s.trim());
+    // header guess: if first row contains any alpha
+    const headerLikely = first.some(v=>/[a-zA-Z]/.test(v));
+    const headers = headerLikely ? first : first.map((_,i)=>`Col${i+1}`);
+    const start = headerLikely ? 1 : 0;
+
+    const rows=[];
+    for(let i=start;i<lines.length;i++){
+      const parts = lines[i].split(",").map(s=>s.trim());
+      const obj={};
+      headers.forEach((h,idx)=> obj[h] = parts[idx] ?? "");
+      rows.push(obj);
+    }
+    return {headers, rows};
+  }
+
+  function sheetToRows(wb, sheetName){
+    const ws = wb.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(ws, {defval:"", raw:true});
+    // Build unified headers set
+    const headersSet = new Set();
+    for(const r of data) Object.keys(r).forEach(k=>headersSet.add(k));
+    const headers = Array.from(headersSet);
+    return {headers, rows: data};
+  }
+
+  async function handleCSV(file){
+    setProgress(5,"Reading CSV…");
+    const {headers, rows} = await parseCSVToRows(file);
+    if(!headers.length){ setProgress(0,"CSV empty."); return; }
+    openSmartImportWizard("csv", {headers, rows});
+    setProgress(100,"CSV loaded. Map & import.");
+  }
+
+  async function handleXLSX(file){
+    if(!window.XLSX){ setProgress(0,"xlsx.full.min.js not loaded."); return; }
+    setProgress(5,"Reading XLSX…");
+    const buf=await file.arrayBuffer();
+    const wb=XLSX.read(buf,{type:"array",cellDates:true});
+    const sheetNames = wb.SheetNames || [];
+    if(!sheetNames.length){ setProgress(0,"No sheets found."); return; }
+
+    // Use first sheet initially
+    const active = sheetNames[0];
+    const {headers, rows} = sheetToRows(wb, active);
+
+    // store wb in state for sheet switching
+    smartImportState = { kind:"xlsx", wb, sheetNames, activeSheet: active, headers, rows, mapping: guessMapping(headers), dateOrder:"DMY" };
+    openSmartImportWizard("xlsx", {headers, rows, sheetNames, activeSheet: active});
+    setProgress(100,"XLSX loaded. Map & import.");
+
+    // enable sheet switching
+    document.getElementById("mapSheet").onchange = ()=>{
+      if(!smartImportState || !smartImportState.wb) return;
+      const sn = document.getElementById("mapSheet").value;
+      smartImportState.activeSheet = sn;
+      const next = sheetToRows(smartImportState.wb, sn);
+      smartImportState.headers = next.headers;
+      smartImportState.rows = next.rows;
+
+      populateMapDropdown("mapDateCol", smartImportState.headers, false);
+      populateMapDropdown("mapDetailsCol", smartImportState.headers, false);
+      populateMapDropdown("mapRemarkCol", smartImportState.headers, true);
+      populateMapDropdown("mapAmountCol", smartImportState.headers, true);
+      populateMapDropdown("mapDebitCol", smartImportState.headers, true);
+      populateMapDropdown("mapCreditCol", smartImportState.headers, true);
+
+      smartImportState.mapping = guessMapping(smartImportState.headers);
+      applyMappingToUI(smartImportState.mapping);
+      rebuildSmartPreview();
+    };
+  }
+
+  /***********************
+   * File router
+   ***********************/
+  async function handleFiles(fileList){
+    const files=Array.from(fileList||[]);
+    if(!files.length) return;
+    const f=files[0];
+    const name=(f.name||"").toLowerCase();
+
+    try{
+      setProgress(0,`Loading: ${f.name}`);
+      if(name.endsWith(".pdf")){ await handlePdf(f); return; }
+      if(name.endsWith(".csv")){ await handleCSV(f); return; }
+      if(name.endsWith(".xls") || name.endsWith(".xlsx")){ await handleXLSX(f); return; }
+      setProgress(0,"Unsupported file type.");
+    }catch(err){
+      console.error(err);
+      setProgress(0,"Error: "+(err?.message||String(err)));
+    }
+  }
+
+  function wireDragDrop(){
+    const dz=document.getElementById("dropZone");
+    const fp=document.getElementById("filePick");
+    const bp=document.getElementById("btnPick");
+    dz.addEventListener("dragover",(e)=>{e.preventDefault(); dz.classList.add("drag");});
+    dz.addEventListener("dragleave",()=>dz.classList.remove("drag"));
+    dz.addEventListener("drop",(e)=>{e.preventDefault(); dz.classList.remove("drag"); if(e.dataTransfer?.files) handleFiles(e.dataTransfer.files);});
+    bp.addEventListener("click",()=>fp.click());
+    fp.addEventListener("change",()=>handleFiles(fp.files));
+  }
+
+  /***********************
+   * Init wiring
+   ***********************/
+  function init(){
+    wireDragDrop();
+    updateLibStatus();
+    setProgress(0,"Ready.");
+    render();
+
+    document.getElementById("monthFilter").onchange=(e)=>{ uiMonth=e.target.value; updatePeriodPill(); render(); };
+    document.getElementById("yearFilter").onchange=applyYearMonthToRawMonth;
+    document.getElementById("monthNameFilter").onchange=applyYearMonthToRawMonth;
+
+    // calendar
+    document.getElementById("calOpenBtn").onclick=(e)=>{e.preventDefault(); const pop=document.getElementById("calPop"); pop.style.display=(pop.style.display==="block"?"none":"block"); if(pop.style.display==="block") renderCalendar();};
+    document.getElementById("mDateDisplay").onclick=openCalendar;
+    document.getElementById("calPrev").onclick=()=>{ calView=new Date(calView.getFullYear(), calView.getMonth()-1, 1); renderCalendar(); };
+    document.getElementById("calNext").onclick=()=>{ calView=new Date(calView.getFullYear(), calView.getMonth()+1, 1); renderCalendar(); };
+    document.addEventListener("click",(e)=>{
+      const pop=document.getElementById("calPop");
+      const wrap=pop.parentElement;
+      if(pop.style.display==="block" && wrap && !wrap.contains(e.target)) closeCalendar();
+    });
+
+    const now=new Date();
+    setManualDateISO(`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`);
+
+    // month settings
+    document.getElementById("btnApplyMonth").onclick=()=>{
+
+const sel = document.getElementById("selMonth");
+const m = sel.dataset.monthKey || "";
+if(!m) return;
+
+AppStore.setOpening(m, parseAmountRaw(document.getElementById("openingInput").value));
+AppStore.setMonthLocked(m, document.getElementById("lockSelect").value === "1");
+setStatus("Month settings applied.");
+render();
+
+    };
+
+    // manual save
+    document.getElementById("btnManualSave").onclick=()=>{
+      const date=document.getElementById("mDateISO").value;
+      const details=String(document.getElementById("mDetails").value||"").trim();
+      const remark=String(document.getElementById("mRemark").value||"").trim();
+      const amount=parseAmountRaw(document.getElementById("mAmount").value);
+      const ok=AppStore.add({date,month:date.slice(0,7),details,amount,remark});
+      if(!ok){ setStatus("Manual save failed (missing fields/amount=0/locked)."); return; }
+      document.getElementById("mDetails").value="";
+      document.getElementById("mAmount").value="";
+      document.getElementById("mRemark").value="";
+      setStatus("Saved.");
+      render();
+    };
+
+    // exports
+    document.getElementById("btnExportJson").onclick=()=>downloadText("ledger-export.json", AppStore.exportJSON(), "application/json");
+    document.getElementById("btnExportXlsx").onclick=exportXLSX;
+    document.getElementById("btnExportPdf").onclick=exportPDF;
+    document.getElementById("btnClear").onclick=()=>{ AppStore.clearAll(); setStatus("Cleared."); render(); };
+    document.getElementById("btnAdd").onclick=()=>{ openCalendar(); setStatus("Pick date, fill details/amount, Save."); };
+
+    // import modal
+    document.getElementById("btnImportClose").onclick=closeImportModal;
+    document.getElementById("btnCancelImport").onclick=closeImportModal;
+    document.getElementById("btnSelectAll").onclick=()=>selectAllImport(true);
+    document.getElementById("btnSelectNone").onclick=()=>selectAllImport(false);
+
+    document.getElementById("btnReparse").onclick=()=>{
+      if(pending.kind!=="CC"){ document.getElementById("pvStatus").textContent="Re-run parse only applies to CC year."; return; }
+      const year=document.getElementById("pvYear").value.trim();
+      const cc=parseMaybankCC(pending.text, year);
+      pending.records=cc;
+      renderImportTable(cc);
+      document.getElementById("pvStatus").textContent=`Reparsed CC: ${cc.length} record(s)`;
+    };
+
+    document.getElementById("btnDoImport").onclick=()=>{
+      const selected=collectSelectedImport();
+      const added=AppStore.addMany(selected);
+      setStatus(`Imported ${added} selected record(s).`);
+      closeImportModal();
+      render();
+    };
+
+    // mapping preview rebuild
+    document.getElementById("btnRebuildPreview").onclick=rebuildSmartPreview;
+
+    // edit modal
+    document.getElementById("btnEditClose").onclick=closeEditModal;
+    document.getElementById("btnEditCancel").onclick=closeEditModal;
+    document.getElementById("btnEditSave").onclick=saveEditModal;
+
+    // safety
+    window.addEventListener("unhandledrejection", (e)=>{
+      console.error("Unhandled rejection:", e.reason);
+      setStatus("Error (see console): " + (e.reason?.message || String(e.reason)));
+    });
+  }
+
+  window.addEventListener("DOMContentLoaded", init);
+  </script>
+</body>
+</html>
