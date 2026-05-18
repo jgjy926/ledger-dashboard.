@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Online Multi‑Month Ledger (v18 Cloud Sync IV 0.2)</title>
+  <title>Online Multi‑Month Ledger (v19 Cloud Sync)</title>
   <link rel="icon" href="data:," />
 
   <style>
@@ -101,7 +101,7 @@
   <div class="wrap">
     <div class="row space">
       <div>
-        <h2 style="margin:0">Online Multi‑Month Ledger (v18 Cloud Sync IV0.2)</h2>
+        <h2 style="margin:0">Online Multi‑Month Ledger (v19 Cloud Sync)</h2>
         <div class="muted">Smart mapping • Date normalization • Koofr Cloud Sync • Fast CDN OCR</div>
       </div>
       <div class="row right">
@@ -520,61 +520,109 @@
     }
 
     // ─────────────────────────────────────────────
-    // OCR / PDF PARSER  (FIX: two-column date handling)
+    // PDF TRANSACTION PARSER  (FIX v19)
     //
-    // Bank statements often produce lines like:
-    //   "02.Apr.2026 01/04 /MUSEE PLATINUM TOKYO-M SP. KUALA LUMPUR MY  120.00"
+    // Bank statement layout (Maybank / CIMB / RHB style):
     //
-    // Column 1 = POSTING date  (DD.Mmm.YYYY  or  DD/MM/YYYY)   ← IGNORED
-    // Column 2 = TRANSACTION date (DD/MM  — no year)           ← USE THIS
-    // Year is inferred from the posting date on the same line (or global fallback).
+    //   Col-1 (Posting Date)   Col-2 (Tx Date)   Description            Amount
+    //   ────────────────────   ───────────────   ─────────────────────  ──────
+    //   22/03                  22/03             MUSEE PLATINUM TOKYO…  133.33
     //
-    // Strategy:
-    //  1. Try the two-column bank-statement pattern first.
-    //  2. Fall back to the original single-date heuristic for other statement formats.
+    // Both column dates are SHORT (DD/MM — no year).
+    // Year is taken from the fallbackYear detected from the PDF header.
+    //
+    // Strategy (highest → lowest priority):
+    //
+    //   PATTERN A  — Two SHORT dates at the start of the line (DD/MM  DD/MM  …)
+    //                Use the SECOND date (transaction date).  ← THIS IS THE FIX
+    //
+    //   PATTERN B  — One FULL date + one SHORT date (old two-column format where
+    //                posting date was printed in full).  Use the SHORT date.
+    //
+    //   PATTERN C  — Fallback: any single date (full or short) on the line.
     // ─────────────────────────────────────────────
     function parseTransactionsFromText(text, fallbackYear) {
       const lines = text.split("\n");
       const parsedItems = [];
 
-      // Matches a FULL posting date: DD.Mmm.YYYY  or  DD/MM/YYYY  or  DD-MM-YYYY
-      const fullDateRe = /\b(\d{1,2})[\/\-\.]([A-Za-z]{3}|\d{1,2})[\/\-\.](\d{4})\b/;
+      // Short date:  DD/MM  (exactly, no 4-digit year attached)
+      // Negative look-ahead prevents matching the start of a full DD/MM/YYYY.
+      const shortDateRe   = /\b(\d{1,2})\/(\d{2})(?!\/\d{2,4})\b/g;
 
-      // Matches a SHORT transaction date: DD/MM  (exactly two numeric groups, no year)
-      const shortDateRe = /\b(\d{1,2})\/(\d{2})\b/;
+      // Full date:  DD/MM/YYYY  or  DD.MM.YYYY  or  DD-MM-YYYY
+      //             also accepts month names: 22.Apr.2026
+      const fullDateRe    = /\b(\d{1,2})[\/\-\.]([A-Za-z]{3}|\d{1,2})[\/\-\.](\d{4})\b/;
 
-      // Matches a trailing amount (handles trailing +/- sign and parentheses)
-      const amountRe = /([-+]?[\d,]+\.\d{2}[+-]?|\([\d,]+\.\d{2}\))(?:\s*)$/;
+      // Trailing amount (handles  123.45  /  123.45-  /  (123.45) )
+      const amountRe      = /([-+]?[\d,]+\.\d{2}[+-]?|\([\d,]+\.\d{2}\))(?:\s*)$/;
 
       for (const rawLine of lines) {
         const line = rawLine.trim().replace(/\s{2,}/g, " ");
         if (!line) continue;
 
         const amtMatch = line.match(amountRe);
-        if (!amtMatch) continue;                           // no amount → skip
-        const rawAmt = amtMatch[1];
+        if (!amtMatch) continue;
+        const rawAmt   = amtMatch[1];
         const beforeAmt = line.substring(0, line.lastIndexOf(rawAmt)).trim();
 
-        // ── PATTERN A: two-column bank statement ──────────────────────────────
-        // Expect a full posting date AND a short transaction date on the same line.
-        const postingMatch = beforeAmt.match(fullDateRe);
-        const txMatch      = beforeAmt.match(shortDateRe);
+        // Reset lastIndex for the global regex on every line
+        shortDateRe.lastIndex = 0;
 
-        if (postingMatch && txMatch) {
-          // Extract year from the posting date (column 1)
+        // Collect all short-date matches from beforeAmt
+        const shortMatches = [];
+        let sm;
+        const tempRe = /\b(\d{1,2})\/(\d{2})(?!\/\d{2,4})\b/g;
+        while ((sm = tempRe.exec(beforeAmt)) !== null) {
+          shortMatches.push({ match: sm[0], day: sm[1], month: sm[2], index: sm.index });
+        }
+
+        // ── PATTERN A: two short dates at start of line ───────────────────────
+        // e.g.  "22/03 22/03 MUSEE PLATINUM TOKYO…"
+        //        ^col1  ^col2  ^description
+        if (shortMatches.length >= 2) {
+          // The SECOND short date is the transaction date
+          const txDate  = shortMatches[1];
+          const txDay   = String(txDate.day).padStart(2, "0");
+          const txMonth = String(txDate.month).padStart(2, "0");
+
+          // Validate month range
+          if (Number(txDate.month) >= 1 && Number(txDate.month) <= 12) {
+            const dateISO = `${fallbackYear}-${txMonth}-${txDay}`;
+
+            // Details = everything after the second short-date match
+            const afterSecond = beforeAmt
+              .substring(txDate.index + txDate.match.length)
+              .replace(/^[^A-Za-z0-9]+/, "")
+              .trim();
+
+            parsedItems.push({
+              date:    dateISO,
+              details: afterSecond || "Transaction Record",
+              amount:  parseAmountRaw(rawAmt),
+              remark:  ""
+            });
+            continue;
+          }
+        }
+
+        // ── PATTERN B: full posting date + short transaction date ─────────────
+        // e.g.  "02.Apr.2026 01/04 /MUSEE PLATINUM…"
+        const postingMatch = beforeAmt.match(fullDateRe);
+        const singleShort  = shortMatches[0];
+
+        if (postingMatch && singleShort) {
           const yearFromPosting = Number(postingMatch[3]);
           const txYear = (yearFromPosting >= 2000 && yearFromPosting <= 2099)
                           ? yearFromPosting : fallbackYear;
 
-          // Build ISO date from the SHORT transaction date (column 2)
-          const txDay   = String(txMatch[1]).padStart(2, "0");
-          const txMonth = String(txMatch[2]).padStart(2, "0");
+          const txDay   = String(singleShort.day).padStart(2, "0");
+          const txMonth = String(singleShort.month).padStart(2, "0");
           const dateISO = `${txYear}-${txMonth}-${txDay}`;
 
-          // Details = everything after the short-date match, before the amount
-          const afterShortDate = beforeAmt.substring(
-            beforeAmt.indexOf(txMatch[0]) + txMatch[0].length
-          ).replace(/^[^A-Za-z0-9]+/, "").trim();           // strip leading / or space
+          const afterShortDate = beforeAmt
+            .substring(singleShort.index + singleShort.match.length)
+            .replace(/^[^A-Za-z0-9]+/, "")
+            .trim();
 
           parsedItems.push({
             date:    dateISO,
@@ -585,7 +633,7 @@
           continue;
         }
 
-        // ── PATTERN B: single-date fallback (original logic) ──────────────────
+        // ── PATTERN C: single date fallback (any format) ──────────────────────
         const singleDateRe = /\b(\d{1,2})[\/\-\.](\d{1,2}|\w{3})([\/\-\.](\d{2,4}))?\b/;
         const dateMatch = beforeAmt.match(singleDateRe);
         if (dateMatch) {
@@ -623,7 +671,7 @@
     }
 
     // ─────────────────────────────────────────────
-    // PDF EXTRACTION (unchanged logic, uses new parser above)
+    // PDF EXTRACTION
     // ─────────────────────────────────────────────
     async function pdfExtractText(file) {
       setProgress(5, "Loading PDF library...");
@@ -774,24 +822,21 @@
     };
 
     // ─────────────────────────────────────────────
-    // CLOUD STORE  (FIX: routes via Cloudflare Worker to bypass CORS)
+    // CLOUD STORE  (FIX v19: Worker-based Koofr proxy)
     //
-    // WHY:  Direct fetch from GitHub Pages → Koofr WebDAV is blocked by CORS.
-    //       Koofr does not emit Access-Control-Allow-Origin for browser requests.
+    // The HTML page (GitHub Pages) cannot call Koofr WebDAV directly — Koofr
+    // does not emit CORS headers for browser requests.
     //
-    // HOW:  A Cloudflare Worker acts as a proxy:
-    //         GET  /  → forwards GET to Koofr, returns JSON with CORS headers
-    //         PUT  /  → forwards PUT body to Koofr, returns 200 with CORS headers
+    // Solution: a Cloudflare Worker (cf-worker.js) acts as a CORS proxy.
+    //   GET  Worker URL  → reads  /ledger/ledger_data.json  from Koofr
+    //   PUT  Worker URL  → writes /ledger/ledger_data.json  to   Koofr
     //
-    //       The Worker injects Basic Auth using secrets stored server-side,
-    //       so credentials never appear in client-side JS.
+    // Credentials (KOOFR_USER, KOOFR_PASS) are stored as Worker Secrets so they
+    // never appear in client-side code.  The browser can also pass them via
+    // X-Koofr-User / X-Koofr-Pass headers as a fallback during initial testing.
     //
-    // SETUP (one-time):
-    //   1. Go to https://dash.cloudflare.com → Workers & Pages → Create Worker
-    //   2. Paste the contents of cf-worker.js (provided alongside this file)
-    //   3. Add Worker Secrets:  KOOFR_USER  and  KOOFR_PASS  (your Koofr app password)
-    //   4. Copy the Worker URL (e.g. https://ledger-proxy.yourname.workers.dev)
-    //   5. Enter that URL in ⚙️ Setup → Cloudflare Worker URL
+    // 404 from the Worker means the Worker script is NOT deployed yet.
+    // Follow the setup steps in cf-worker.js and the ⚙️ Setup dialog.
     // ─────────────────────────────────────────────
     const CloudStore = {
       cfgKey: 'ledger_cloud_config',
@@ -807,29 +852,24 @@
         localStorage.setItem(this.cfgKey, JSON.stringify({ url, user, pass }));
       },
 
-      // Build headers for the CF Worker call.
-      // If the user also provides credentials here, they are forwarded to the Worker
-      // which can use them as an override (or the Worker can ignore them and use its secrets).
       _buildHeaders(extra = {}) {
         const cfg = this.getConfig();
         const h = { 'Content-Type': 'application/json', ...extra };
-        if (cfg.user && cfg.pass) {
-          // Passed as custom header so the Worker can forward to Koofr without
-          // exposing credentials in a query string.
-          h['X-Koofr-User'] = cfg.user;
-          h['X-Koofr-Pass'] = cfg.pass;
-        }
+        if (cfg.user && cfg.user.trim()) h['X-Koofr-User'] = cfg.user.trim();
+        if (cfg.pass && cfg.pass.trim()) h['X-Koofr-Pass'] = cfg.pass.trim();
         return h;
       },
 
       async saveToCloud() {
         const cfg = this.getConfig();
-        if (!cfg.url) return showToast("Please set up the Cloudflare Worker URL in ⚙️ Setup.");
+        if (!cfg.url || !cfg.url.trim()) {
+          return showToast("Please configure the Cloudflare Worker URL via ⚙️ Setup first.");
+        }
 
         const payload = JSON.stringify(AppStore.data);
         setStatus("Saving to cloud via Cloudflare Worker...");
         try {
-          const res = await fetch(cfg.url, {
+          const res = await fetch(cfg.url.trim(), {
             method: 'PUT',
             headers: this._buildHeaders(),
             body: payload
@@ -838,21 +878,25 @@
             setStatus("Ready.");
             showToast("Saved to Cloud successfully!");
           } else {
-            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+            const errText = await res.text().catch(() => res.statusText);
+            throw new Error(`HTTP ${res.status} — ${errText}`);
           }
         } catch (e) {
           setStatus("Cloud save failed.");
-          showToast("Error saving to cloud: " + e.message);
+          showToast("Cloud save error: " + e.message);
+          console.error("[CloudStore.saveToCloud]", e);
         }
       },
 
       async loadFromCloud() {
         const cfg = this.getConfig();
-        if (!cfg.url) return showToast("Please set up the Cloudflare Worker URL in ⚙️ Setup.");
+        if (!cfg.url || !cfg.url.trim()) {
+          return showToast("Please configure the Cloudflare Worker URL via ⚙️ Setup first.");
+        }
 
         setStatus("Loading from cloud via Cloudflare Worker...");
         try {
-          const res = await fetch(cfg.url, {
+          const res = await fetch(cfg.url.trim(), {
             method: 'GET',
             headers: this._buildHeaders()
           });
@@ -861,11 +905,13 @@
             AppStore.loadData(data);
             setStatus("Ready.");
           } else {
-            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+            const errText = await res.text().catch(() => res.statusText);
+            throw new Error(`HTTP ${res.status} — ${errText}`);
           }
         } catch (e) {
           setStatus("Cloud load failed.");
-          showToast("Error loading from cloud: " + e.message);
+          showToast("Cloud load error: " + e.message);
+          console.error("[CloudStore.loadFromCloud]", e);
         }
       }
     };
