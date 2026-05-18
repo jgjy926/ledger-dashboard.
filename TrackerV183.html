@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Online Multi‑Month Ledger (v19 Cloud Sync)</title>
+  <title>Online Multi‑Month Ledger (v20 Filtered View)</title>
   <link rel="icon" href="data:," />
 
   <style>
@@ -101,7 +101,7 @@
   <div class="wrap">
     <div class="row space">
       <div>
-        <h2 style="margin:0">Online Multi‑Month Ledger (v19 Cloud Sync)</h2>
+        <h2 style="margin:0">Online Multi‑Month Ledger (v20 Filtered View)</h2>
         <div class="muted">Smart mapping • Date normalization • Koofr Cloud Sync • Fast CDN OCR</div>
       </div>
       <div class="row right">
@@ -1064,41 +1064,94 @@
     // ─────────────────────────────────────────────
     // RENDER
     // ─────────────────────────────────────────────
+
+    // Single source of truth: which month keys are currently visible.
+    // Priority: month tab (activeMonth) > month dropdown > year dropdown > all
+    function getFilteredMonthKeys() {
+      const allMonths = Object.keys(AppStore.data).sort().reverse();
+      if (AppStore.activeMonth) {
+        // A specific tab is selected — show only that month
+        return allMonths.filter(m => m === AppStore.activeMonth);
+      }
+      const mf = document.getElementById("monthNameFilter").value;
+      if (mf) {
+        // Month dropdown is set — show only that month
+        return allMonths.filter(m => m === mf);
+      }
+      const yf = document.getElementById("yearFilter").value;
+      if (yf) {
+        // Year dropdown is set — show all months of that year
+        return allMonths.filter(m => m.startsWith(yf));
+      }
+      // Nothing selected — show everything
+      return allMonths;
+    }
+
+    // Build a label for the Period pill from current filter state
+    function getPeriodLabel() {
+      if (AppStore.activeMonth) return "Period: " + fmtMonthMMM(AppStore.activeMonth);
+      const mf = document.getElementById("monthNameFilter").value;
+      if (mf) return "Period: " + fmtMonthMMM(mf);
+      const yf = document.getElementById("yearFilter").value;
+      if (yf) return "Period: " + yf;
+      return "Period: All";
+    }
+
     function renderTabs() {
       const tb = document.getElementById("monthTabs");
       tb.innerHTML = "";
       const months = Object.keys(AppStore.data).sort().reverse();
-      
+
+      // Rebuild year and month dropdowns (preserve current selections)
       const yf = document.getElementById("yearFilter");
       const mf = document.getElementById("monthNameFilter");
+      const prevYear  = yf.value;
+      const prevMonth = mf.value;
       yf.innerHTML = '<option value="">All</option>';
       mf.innerHTML = '<option value="">All</option>';
-      
       const years = new Set(months.map(m => m.substring(0,4)));
       years.forEach(y => yf.innerHTML += `<option value="${y}">${y}</option>`);
       months.forEach(m => mf.innerHTML += `<option value="${m}">${fmtMonthMMM(m)}</option>`);
+      // Restore previous selections if they still exist
+      if (prevYear  && yf.querySelector(`option[value="${prevYear}"]`))  yf.value = prevYear;
+      if (prevMonth && mf.querySelector(`option[value="${prevMonth}"]`)) mf.value = prevMonth;
 
-      if(!AppStore.activeMonth && months.length > 0) AppStore.activeMonth = months[0];
-      
+      if (!AppStore.activeMonth && months.length > 0 && !yf.value && !mf.value) {
+        AppStore.activeMonth = months[0];
+      }
+
       months.forEach(m => {
         const btn = document.createElement("button");
         btn.className = "tabBtn " + (m === AppStore.activeMonth ? "active" : "");
         btn.textContent = fmtMonthMMM(m);
-        btn.onclick = () => { AppStore.activeMonth = m; AppStore.renderDashboard(); };
+        btn.onclick = () => {
+          // Clear dropdown filters so tab takes priority
+          document.getElementById("yearFilter").value = "";
+          document.getElementById("monthNameFilter").value = "";
+          AppStore.activeMonth = m;
+          AppStore.renderDashboard();
+        };
         tb.appendChild(btn);
       });
-      
-      if(AppStore.activeMonth && AppStore.data[AppStore.activeMonth]) {
-         document.getElementById("selMonth").value = fmtMonthMMM(AppStore.activeMonth);
-         document.getElementById("openingInput").value = AppStore.data[AppStore.activeMonth].opening || '';
-         document.getElementById("lockSelect").value = AppStore.data[AppStore.activeMonth].locked ? "1" : "0";
+
+      // Update the Month Settings panel to reflect activeMonth
+      if (AppStore.activeMonth && AppStore.data[AppStore.activeMonth]) {
+        document.getElementById("selMonth").value = fmtMonthMMM(AppStore.activeMonth);
+        document.getElementById("openingInput").value = AppStore.data[AppStore.activeMonth].opening || '';
+        document.getElementById("lockSelect").value = AppStore.data[AppStore.activeMonth].locked ? "1" : "0";
       }
+
+      // Update Period pill
+      document.getElementById("periodPill").textContent = getPeriodLabel();
     }
 
     function renderKPIs() {
+      // Only sum over the currently visible months
+      const keys = getFilteredMonthKeys();
       let count=0, debit=0, credit=0;
-      for(let m in AppStore.data) {
+      for (const m of keys) {
         const d = AppStore.data[m];
+        if (!d) continue;
         const res = computeDebitCredit(d.items);
         count += res.count; debit += res.debit; credit += res.credit;
       }
@@ -1114,18 +1167,19 @@
     function renderTableRows() {
       const container = document.getElementById("months");
       container.innerHTML = "";
-      
-      const monthKeys = Object.keys(AppStore.data).sort().reverse();
+
+      // Only render the currently visible months
+      const monthKeys = getFilteredMonthKeys();
       monthKeys.forEach(mKey => {
          const mData = AppStore.data[mKey];
          if(!mData || mData.items.length === 0) return;
-         
+
          const div = document.createElement("div");
          div.className = "monthCard";
-         
+
          const isLocked = mData.locked;
          const lockIcon = isLocked ? "🔒 " : "";
-         
+
          let html = `
            <div class="monthHd">
              <div><b>${lockIcon}${fmtMonthMMM(mKey)}</b> <span class="muted" style="margin-left:10px">Opening: ${fmt(mData.opening)}</span></div>
@@ -1143,7 +1197,7 @@
                </thead>
                <tbody>
          `;
-         
+
          let runBal = mData.opening || 0;
          mData.items.forEach(it => {
             runBal += it.amount;
@@ -1160,7 +1214,7 @@
               </tr>
             `;
          });
-         
+
          html += `
                </tbody>
              </table>
@@ -1365,6 +1419,23 @@
       showToast("Exported to PDF.");
     };
     
+    // ─────────────────────────────────────────────
+    // FILTER DROPDOWN HANDLERS
+    // ─────────────────────────────────────────────
+    document.getElementById("yearFilter").onchange = () => {
+      // Clear month dropdown and tab selection so year filter takes priority
+      document.getElementById("monthNameFilter").value = "";
+      AppStore.activeMonth = null;
+      AppStore.renderDashboard();
+    };
+
+    document.getElementById("monthNameFilter").onchange = () => {
+      // Clear year dropdown and tab selection so month filter takes priority
+      document.getElementById("yearFilter").value = "";
+      AppStore.activeMonth = null;
+      AppStore.renderDashboard();
+    };
+
     // Boot
     window.onload = () => AppStore.init();
   </script>
