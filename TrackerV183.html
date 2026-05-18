@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Online Multi‑Month Ledger (v20 Filtered View)</title>
+  <title>Online Multi‑Month Ledger (v21 Export Fix)</title>
   <link rel="icon" href="data:," />
 
   <style>
@@ -101,7 +101,7 @@
   <div class="wrap">
     <div class="row space">
       <div>
-        <h2 style="margin:0">Online Multi‑Month Ledger (v20 Filtered View)</h2>
+        <h2 style="margin:0">Online Multi‑Month Ledger (v21 Export Fix)</h2>
         <div class="muted">Smart mapping • Date normalization • Koofr Cloud Sync • Fast CDN OCR</div>
       </div>
       <div class="row right">
@@ -1349,40 +1349,57 @@
     };
 
     // ─────────────────────────────────────────────
-    // EXPORT XLSX
+    // EXPORT XLSX  (uses active filter; includes closing balance row)
     // ─────────────────────────────────────────────
     document.getElementById("btnExportXlsx").onclick = () => {
-      if(Object.keys(AppStore.data).length === 0) return showToast("No data to export.");
+      const filteredKeys = getFilteredMonthKeys();
+      if(filteredKeys.length === 0) return showToast("No data to export.");
       const wb = XLSX.utils.book_new();
-      for(let m in AppStore.data) {
-         let runBal = AppStore.data[m].opening || 0;
-         const exportData = AppStore.data[m].items.map(it => {
-            runBal += it.amount;
-            return {
-               Date: fmtDateDDMMMYYYY(it.date),
-               Details: it.details,
-               Debit: it.amount > 0 ? it.amount : '',
-               Credit: it.amount < 0 ? Math.abs(it.amount) : '',
-               Balance: runBal,
-               Remark: it.remark
-            };
-         });
-         exportData.unshift({
+      for(const m of filteredKeys) {
+         const mData = AppStore.data[m];
+         if(!mData) continue;
+         const opening = mData.opening || 0;
+
+         // Opening row
+         const exportData = [{
             Date: "Opening", Details: "Opening Balance",
-            Debit: '', Credit: '', Balance: AppStore.data[m].opening || 0, Remark: ""
+            Debit: '', Credit: '', Balance: opening, Remark: ""
+         }];
+
+         // Transaction rows — amount is signed: +debit / -credit
+         let runBal = opening;
+         for(const it of mData.items) {
+            runBal += it.amount;   // opening + debit - credit (amount already signed)
+            exportData.push({
+               Date:    fmtDateDDMMMYYYY(it.date),
+               Details: it.details,
+               Debit:   it.amount > 0 ? it.amount : '',
+               Credit:  it.amount < 0 ? Math.abs(it.amount) : '',
+               Balance: runBal,
+               Remark:  it.remark
+            });
+         }
+
+         // Closing balance summary row
+         exportData.push({
+            Date: "Closing", Details: "Closing Balance",
+            Debit: '', Credit: '', Balance: runBal, Remark: ""
          });
+
          const ws = XLSX.utils.json_to_sheet(exportData);
          XLSX.utils.book_append_sheet(wb, ws, fmtMonthMMM(m));
       }
-      XLSX.writeFile(wb, "Ledger_Export.xlsx");
+      const periodLabel = getPeriodLabel().replace("Period: ", "").replace(/[^A-Za-z0-9._-]/g, "_");
+      XLSX.writeFile(wb, `Ledger_${periodLabel}.xlsx`);
       showToast("Exported to Excel.");
     };
 
     // ─────────────────────────────────────────────
-    // EXPORT PDF
+    // EXPORT PDF  (uses active filter; includes closing balance row per month)
     // ─────────────────────────────────────────────
     document.getElementById("btnExportPdf").onclick = () => {
-      if(Object.keys(AppStore.data).length === 0) return showToast("No data to export.");
+      const filteredKeys = getFilteredMonthKeys();
+      if(filteredKeys.length === 0) return showToast("No data to export.");
       if(!window.jspdf) return showToast("PDF library still loading, please wait.");
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF();
@@ -1391,31 +1408,50 @@
       doc.setFontSize(10);
       doc.setTextColor(100);
       let finalY = 30;
-      for(let m in AppStore.data) {
-         let runBal = AppStore.data[m].opening || 0;
-         const tableBody = AppStore.data[m].items.map(it => {
-            runBal += it.amount;
-            return [
+      for(const m of filteredKeys) {
+         const mData = AppStore.data[m];
+         if(!mData) continue;
+         const opening = mData.opening || 0;
+
+         // Transaction rows
+         let runBal = opening;
+         const tableBody = [];
+         for(const it of mData.items) {
+            runBal += it.amount;   // opening + debit - credit (amount already signed)
+            tableBody.push([
                fmtDateDDMMMYYYY(it.date),
                it.details,
                it.amount > 0 ? fmt(it.amount) : '',
                it.amount < 0 ? fmt(Math.abs(it.amount)) : '',
                fmt(runBal)
-            ];
-         });
-         doc.text(`${fmtMonthMMM(m)} - Opening: ${fmt(AppStore.data[m].opening||0)}`, 14, finalY);
+            ]);
+         }
+
+         // Closing balance summary row appended to the table body
+         tableBody.push([
+            'Closing', 'Closing Balance', '', '', fmt(runBal)
+         ]);
+
+         doc.text(`${fmtMonthMMM(m)} — Opening: ${fmt(opening)}`, 14, finalY);
          doc.autoTable({
            startY: finalY + 5,
-           head: [['Date', 'Details', 'Debit (+)', 'Credit (-)', 'Balance']],
+           head: [['Date', 'Details', 'Debit (+)', 'Credit (−)', 'Balance']],
            body: tableBody,
            theme: 'grid',
            headStyles: { fillColor: [124, 92, 255] },
+           // Bold the closing balance row (last row)
+           didParseCell: (data) => {
+             if(data.row.index === tableBody.length - 1) {
+               data.cell.styles.fontStyle = 'bold';
+             }
+           },
            margin: { left: 14 }
          });
          finalY = doc.lastAutoTable.finalY + 15;
          if(finalY > 260) { doc.addPage(); finalY = 20; }
       }
-      doc.save("Ledger_Export.pdf");
+      const periodLabel = getPeriodLabel().replace("Period: ", "").replace(/[^A-Za-z0-9._-]/g, "_");
+      doc.save(`Ledger_${periodLabel}.pdf`);
       showToast("Exported to PDF.");
     };
     
