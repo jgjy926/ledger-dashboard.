@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Online Multi‑Month Ledger (v18 Cloud Sync IV 0.1)</title>
+  <title>Online Multi‑Month Ledger (v18 Cloud Sync IV 0.2)</title>
   <link rel="icon" href="data:," />
 
   <style>
@@ -101,7 +101,7 @@
   <div class="wrap">
     <div class="row space">
       <div>
-        <h2 style="margin:0">Online Multi‑Month Ledger (v18 Cloud Sync)</h2>
+        <h2 style="margin:0">Online Multi‑Month Ledger (v18 Cloud Sync IV0.2)</h2>
         <div class="muted">Smart mapping • Date normalization • Koofr Cloud Sync • Fast CDN OCR</div>
       </div>
       <div class="row right">
@@ -262,24 +262,32 @@
     <div id="months"></div>
   </div>
 
+  <!-- Cloud Setup Modal -->
   <div class="modalMask" id="maskCloud">
     <div class="modal modal-sm">
       <div class="row space">
-        <div><b>Koofr Cloud Setup</b><div class="muted">Enter your WebDAV credentials.</div></div>
+        <div>
+          <b>Cloud Setup (via Cloudflare Worker)</b>
+          <div class="muted">Point to your CF Worker URL — it proxies Koofr WebDAV and handles CORS.</div>
+        </div>
       </div>
       <div class="hr"></div>
       <div class="field" style="margin-top:8px">
-        <label>WebDAV URL</label>
-        <input id="cloudUrl" value="https://app.koofr.net/dav/ledger_data.json" />
-        <div class="mini">E.g., https://app.koofr.net/dav/MyFolder/ledger_data.json</div>
+        <label>Cloudflare Worker URL</label>
+        <input id="cloudUrl" placeholder="https://your-worker.your-subdomain.workers.dev" />
+        <div class="mini">
+          Deploy the included <strong>cf-worker.js</strong> to Cloudflare Workers.<br>
+          The Worker proxies all requests to Koofr and injects CORS + Auth headers.<br>
+          Example: <code>https://ledger-proxy.yourname.workers.dev</code>
+        </div>
       </div>
       <div class="field" style="margin-top:8px">
-        <label>Email (Username)</label>
-        <input id="cloudUser" placeholder="you@example.com (leave blank if Cloudflare handles auth)" />
+        <label>Koofr Email (stored in Worker secret — leave blank if already set there)</label>
+        <input id="cloudUser" placeholder="you@example.com" />
       </div>
       <div class="field" style="margin-top:8px">
-        <label>App Password</label>
-        <input id="cloudPass" type="password" placeholder="Leave blank if Cloudflare handles auth" />
+        <label>Koofr App Password (stored in Worker secret — leave blank if already set there)</label>
+        <input id="cloudPass" type="password" placeholder="Leave blank if Worker secret handles auth" />
       </div>
       <div class="hr"></div>
       <div class="row right">
@@ -304,13 +312,13 @@
       <!-- Smart Mapping for Excel/CSV -->
       <div id="mapSection" style="display:none">
         <div class="sectionTitle">Smart Mapping</div>
-        <div class="muted">Auto-detected fields. Adjust if needed, then click “Rebuild Preview”.</div>
+        <div class="muted">Auto-detected fields. Adjust if needed, then click "Rebuild Preview".</div>
 
         <div class="grid2" style="margin-top:10px">
           <div class="field">
             <label>Sheet (XLSX only)</label>
             <select id="mapSheet"></select>
-            <div class="mini">If this is CSV, leave as “(CSV)”.</div>
+            <div class="mini">If this is CSV, leave as "(CSV)".</div>
           </div>
           <div class="field">
             <label>Date format</label>
@@ -410,13 +418,14 @@
     }
   </script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <!-- jspdf and autotable for exports -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
-  <!-- Tesseract loaded directly from Fast CDN -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
   <script>
+    // ─────────────────────────────────────────────
+    // UTILITIES
+    // ─────────────────────────────────────────────
     function setStatus(msg){ document.getElementById("status").textContent = msg; }
     function setProgress(pct,msg){
       document.getElementById("progFill").style.width = Math.max(0,Math.min(100,pct))+"%";
@@ -448,7 +457,7 @@
       s=s.replace(/RM\s*/ig,"").replace(/\s+/g,"");
       let sign=1;
       if(/[+-]$/.test(s)){ sign=s.endsWith("-")?-1:1; s=s.slice(0,-1); }
-      if(/^\(.*\)$/.test(s)){ sign=-1; s=s.slice(1,-1); } // (123.45) => negative
+      if(/^\(.*\)$/.test(s)){ sign=-1; s=s.slice(1,-1); }
       if(/^[+-]/.test(s)){ sign=s.startsWith("-")?-1:1; s=s.slice(1); }
       s=s.replace(/,/g,"");
       const n=Number(s);
@@ -463,7 +472,6 @@
 
     const MMM = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
     
-    // REQUIREMENT A: Mmm.YYYY FORMAT
     function fmtMonthMMM(monthISO){
       const m=String(monthISO||"").match(/^(\d{4})-(\d{2})$/);
       if(!m) return monthISO||"";
@@ -480,32 +488,21 @@
       const yrs=Array.from(new Set((String(s||"").match(/\b20\d{2}\b/g)||[]).map(x=>Number(x)).filter(n=>n>=2000&&n<=2099)));
       yrs.sort((a,b)=>a-b); return yrs;
     }
-    
-    function toISOFromDDMM(ddmm,year){
-      const m=String(ddmm||"").match(/^(\d{2})\/(\d{2})$/);
-      if(!m) return "";
-      if(!/^\d{4}$/.test(String(year||"").trim())) return "";
-      return `${year}-${m[2]}-${m[1]}`;
-    }
 
-    // Date normalization
     function normalizeToISODate(val, order="DMY"){
       if(val === null || val === undefined || val === "") return "";
-      // Excel/Date Object
       if(val instanceof Date && !isNaN(val.getTime())){
         const y=val.getFullYear();
         const m=String(val.getMonth()+1).padStart(2,"0");
         const d=String(val.getDate()).padStart(2,"0");
         return `${y}-${m}-${d}`;
       }
-      // Excel Serial Number
       if(typeof val === "number" && isFinite(val)){
         const base = Date.UTC(1899, 11, 30);
         const ms = base + Math.round(val * 86400000);
         const d = new Date(ms);
         return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}`;
       }
-      
       let s = String(val).trim().replace(/[-\.]/g, "/");
       const parts = s.split("/");
       if(parts.length===3) {
@@ -514,7 +511,7 @@
         let y,m,d;
         if(order==="YMD"){ y=p1; m=p2; d=p3; }
         else if(order==="MDY"){ m=p1; d=p2; y=p3; }
-        else { d=p1; m=p2; y=p3; } // DMY default
+        else { d=p1; m=p2; y=p3; }
         if(y>1900 && y<2100 && m>=1 && m<=12 && d>=1 && d<=31) {
             return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
         }
@@ -522,9 +519,184 @@
       return "";
     }
 
-    // Main State Manager
+    // ─────────────────────────────────────────────
+    // OCR / PDF PARSER  (FIX: two-column date handling)
+    //
+    // Bank statements often produce lines like:
+    //   "02.Apr.2026 01/04 /MUSEE PLATINUM TOKYO-M SP. KUALA LUMPUR MY  120.00"
+    //
+    // Column 1 = POSTING date  (DD.Mmm.YYYY  or  DD/MM/YYYY)   ← IGNORED
+    // Column 2 = TRANSACTION date (DD/MM  — no year)           ← USE THIS
+    // Year is inferred from the posting date on the same line (or global fallback).
+    //
+    // Strategy:
+    //  1. Try the two-column bank-statement pattern first.
+    //  2. Fall back to the original single-date heuristic for other statement formats.
+    // ─────────────────────────────────────────────
+    function parseTransactionsFromText(text, fallbackYear) {
+      const lines = text.split("\n");
+      const parsedItems = [];
+
+      // Matches a FULL posting date: DD.Mmm.YYYY  or  DD/MM/YYYY  or  DD-MM-YYYY
+      const fullDateRe = /\b(\d{1,2})[\/\-\.]([A-Za-z]{3}|\d{1,2})[\/\-\.](\d{4})\b/;
+
+      // Matches a SHORT transaction date: DD/MM  (exactly two numeric groups, no year)
+      const shortDateRe = /\b(\d{1,2})\/(\d{2})\b/;
+
+      // Matches a trailing amount (handles trailing +/- sign and parentheses)
+      const amountRe = /([-+]?[\d,]+\.\d{2}[+-]?|\([\d,]+\.\d{2}\))(?:\s*)$/;
+
+      for (const rawLine of lines) {
+        const line = rawLine.trim().replace(/\s{2,}/g, " ");
+        if (!line) continue;
+
+        const amtMatch = line.match(amountRe);
+        if (!amtMatch) continue;                           // no amount → skip
+        const rawAmt = amtMatch[1];
+        const beforeAmt = line.substring(0, line.lastIndexOf(rawAmt)).trim();
+
+        // ── PATTERN A: two-column bank statement ──────────────────────────────
+        // Expect a full posting date AND a short transaction date on the same line.
+        const postingMatch = beforeAmt.match(fullDateRe);
+        const txMatch      = beforeAmt.match(shortDateRe);
+
+        if (postingMatch && txMatch) {
+          // Extract year from the posting date (column 1)
+          const yearFromPosting = Number(postingMatch[3]);
+          const txYear = (yearFromPosting >= 2000 && yearFromPosting <= 2099)
+                          ? yearFromPosting : fallbackYear;
+
+          // Build ISO date from the SHORT transaction date (column 2)
+          const txDay   = String(txMatch[1]).padStart(2, "0");
+          const txMonth = String(txMatch[2]).padStart(2, "0");
+          const dateISO = `${txYear}-${txMonth}-${txDay}`;
+
+          // Details = everything after the short-date match, before the amount
+          const afterShortDate = beforeAmt.substring(
+            beforeAmt.indexOf(txMatch[0]) + txMatch[0].length
+          ).replace(/^[^A-Za-z0-9]+/, "").trim();           // strip leading / or space
+
+          parsedItems.push({
+            date:    dateISO,
+            details: afterShortDate || "Transaction Record",
+            amount:  parseAmountRaw(rawAmt),
+            remark:  ""
+          });
+          continue;
+        }
+
+        // ── PATTERN B: single-date fallback (original logic) ──────────────────
+        const singleDateRe = /\b(\d{1,2})[\/\-\.](\d{1,2}|\w{3})([\/\-\.](\d{2,4}))?\b/;
+        const dateMatch = beforeAmt.match(singleDateRe);
+        if (dateMatch) {
+          const rawDate = dateMatch[0];
+          const details = beforeAmt.replace(rawDate, "").trim();
+          let dateISO = "";
+
+          const delim = rawDate.includes("/") ? "/" : rawDate.includes("-") ? "-" : ".";
+          const parts = rawDate.split(delim);
+          if (parts.length >= 2) {
+            const day = parts[0].padStart(2, "0");
+            let month = parts[1];
+            if (isNaN(month)) {
+              const mIdx = MMM.findIndex(m => m.toLowerCase() === month.toLowerCase().substring(0,3));
+              month = mIdx !== -1 ? String(mIdx+1).padStart(2,"0") : "01";
+            } else {
+              month = month.padStart(2,"0");
+            }
+            const yr = parts[2]
+              ? (parts[2].length === 2 ? "20" + parts[2] : parts[2])
+              : fallbackYear;
+            dateISO = `${yr}-${month}-${day}`;
+          }
+          if (!dateISO) dateISO = normalizeToISODate(rawDate);
+
+          parsedItems.push({
+            date:    dateISO || rawDate,
+            details: details || "Transaction Record",
+            amount:  parseAmountRaw(rawAmt),
+            remark:  ""
+          });
+        }
+      }
+      return parsedItems;
+    }
+
+    // ─────────────────────────────────────────────
+    // PDF EXTRACTION (unchanged logic, uses new parser above)
+    // ─────────────────────────────────────────────
+    async function pdfExtractText(file) {
+      setProgress(5, "Loading PDF library...");
+      const arr = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({data: arr}).promise;
+      let fullText = "";
+      
+      setProgress(15, "Extracting PDF text layer...");
+      for(let i=1; i<=pdf.numPages; i++){
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const strings = content.items.map(it => it.str);
+        fullText += strings.join(" ") + "\n";
+      }
+
+      const yearCands = yearCandidatesFromText(fullText);
+      const estYear = yearCands.length > 0 ? yearCands[yearCands.length-1] : new Date().getFullYear();
+      
+      setProgress(40, "Parsing statement text layout...");
+      let parsedItems = parseTransactionsFromText(fullText, estYear);
+
+      // Deep OCR fallback for scanned (non-searchable) PDFs
+      if(parsedItems.length === 0 && fullText.trim().length < 50) {
+         setProgress(45, "Scanned PDF. Booting Web-Worker OCR engine...");
+         try {
+           const worker = await Tesseract.createWorker('eng', 1, {
+              workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+              corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0/tesseract-core.wasm.js'
+           });
+           
+           let ocrText = "";
+           for(let i=1; i<=pdf.numPages; i++) {
+             const progressPct = 45 + Math.round((i / pdf.numPages) * 45);
+             setProgress(progressPct, `Performing deep OCR on Page ${i}/${pdf.numPages}...`);
+             const page = await pdf.getPage(i);
+             const viewport = page.getViewport({ scale: 2.0 });
+             const canvas = document.createElement('canvas');
+             const context = canvas.getContext('2d');
+             canvas.height = viewport.height;
+             canvas.width = viewport.width;
+             await page.render({ canvasContext: context, viewport: viewport }).promise;
+             const { data: { text } } = await worker.recognize(canvas);
+             ocrText += text + "\n";
+           }
+           await worker.terminate();
+           fullText = ocrText;
+           parsedItems = parseTransactionsFromText(fullText, estYear);
+         } catch (ocrError) {
+           console.error("OCR Failed:", ocrError);
+           showToast("OCR processing failed: " + ocrError.message);
+         }
+      }
+      
+      setProgress(100, "Done.");
+      return { raw: fullText, items: parsedItems, year: estYear };
+    }
+
+    async function processExcelCsv(file) {
+      setProgress(10, "Reading spreadsheet...");
+      const arr = await file.arrayBuffer();
+      const wb = XLSX.read(arr, {type:'array', cellDates:true});
+      setProgress(50, "Mapping headers...");
+      return wb;
+    }
+
+    // ─────────────────────────────────────────────
+    // APP STORE
+    // ─────────────────────────────────────────────
+    let previewData = [];
+    let currentWb = null;
+    
     const AppStore = {
-      data: {}, // format: { "2026-05": { items: [], opening: 0, locked: false } }
+      data: {},
       activeMonth: null,
       generateId: () => Date.now().toString(36) + Math.random().toString(36).substr(2,5),
       
@@ -552,8 +724,6 @@
             this.data[monthKey].items.push(item);
           }
         });
-        
-        // sort dates
         for(let key in this.data) {
           this.data[key].items.sort((a,b) => a.date.localeCompare(b.date));
         }
@@ -572,7 +742,6 @@
         const idx = this.data[monthKey].items.findIndex(i => i.id === id);
         if(idx > -1) {
           this.data[monthKey].items[idx] = { ...this.data[monthKey].items[idx], ...updatedData };
-          // If date changed significantly to a new month, re-add
           const newMonth = updatedData.date.substring(0,7);
           if(newMonth !== monthKey) {
             const item = this.data[monthKey].items.splice(idx, 1)[0];
@@ -604,191 +773,106 @@
       }
     };
 
-    // REQUIREMENT B: Cloud Integration (Koofr / Cloudflare Gateway)
+    // ─────────────────────────────────────────────
+    // CLOUD STORE  (FIX: routes via Cloudflare Worker to bypass CORS)
+    //
+    // WHY:  Direct fetch from GitHub Pages → Koofr WebDAV is blocked by CORS.
+    //       Koofr does not emit Access-Control-Allow-Origin for browser requests.
+    //
+    // HOW:  A Cloudflare Worker acts as a proxy:
+    //         GET  /  → forwards GET to Koofr, returns JSON with CORS headers
+    //         PUT  /  → forwards PUT body to Koofr, returns 200 with CORS headers
+    //
+    //       The Worker injects Basic Auth using secrets stored server-side,
+    //       so credentials never appear in client-side JS.
+    //
+    // SETUP (one-time):
+    //   1. Go to https://dash.cloudflare.com → Workers & Pages → Create Worker
+    //   2. Paste the contents of cf-worker.js (provided alongside this file)
+    //   3. Add Worker Secrets:  KOOFR_USER  and  KOOFR_PASS  (your Koofr app password)
+    //   4. Copy the Worker URL (e.g. https://ledger-proxy.yourname.workers.dev)
+    //   5. Enter that URL in ⚙️ Setup → Cloudflare Worker URL
+    // ─────────────────────────────────────────────
     const CloudStore = {
       cfgKey: 'ledger_cloud_config',
+
       getConfig() {
-        return JSON.parse(localStorage.getItem(this.cfgKey) || '{"url":"https://app.koofr.net/dav/ledger_data.json","user":"","pass":""}');
+        return JSON.parse(
+          localStorage.getItem(this.cfgKey) ||
+          '{"url":"","user":"","pass":""}'
+        );
       },
+
       saveConfig(url, user, pass) {
-        localStorage.setItem(this.cfgKey, JSON.stringify({url, user, pass}));
+        localStorage.setItem(this.cfgKey, JSON.stringify({ url, user, pass }));
       },
-      getAuth() {
+
+      // Build headers for the CF Worker call.
+      // If the user also provides credentials here, they are forwarded to the Worker
+      // which can use them as an override (or the Worker can ignore them and use its secrets).
+      _buildHeaders(extra = {}) {
         const cfg = this.getConfig();
-        if(!cfg.url) return null;
-        const headers = {};
-        // If Username & Password are provided, inject Basic Auth.
-        // If left empty, Cloudflare proxy injects secret headers automatically.
-        if(cfg.user && cfg.pass) {
-          headers['Authorization'] = 'Basic ' + btoa(cfg.user + ':' + cfg.pass);
+        const h = { 'Content-Type': 'application/json', ...extra };
+        if (cfg.user && cfg.pass) {
+          // Passed as custom header so the Worker can forward to Koofr without
+          // exposing credentials in a query string.
+          h['X-Koofr-User'] = cfg.user;
+          h['X-Koofr-Pass'] = cfg.pass;
         }
-        return { url: cfg.url, headers };
+        return h;
       },
+
       async saveToCloud() {
-        const auth = this.getAuth();
-        if(!auth) return showToast("Please setup cloud configuration URL.");
-        
+        const cfg = this.getConfig();
+        if (!cfg.url) return showToast("Please set up the Cloudflare Worker URL in ⚙️ Setup.");
+
         const payload = JSON.stringify(AppStore.data);
-        setStatus("Saving to cloud...");
+        setStatus("Saving to cloud via Cloudflare Worker...");
         try {
-          const res = await fetch(auth.url, { method: 'PUT', headers: { ...auth.headers, 'Content-Type':'application/json'}, body: payload });
-          if(res.ok) { setStatus("Ready."); showToast("Saved to Cloud successfully!"); }
-          else throw new Error(res.statusText);
-        } catch(e) {
+          const res = await fetch(cfg.url, {
+            method: 'PUT',
+            headers: this._buildHeaders(),
+            body: payload
+          });
+          if (res.ok) {
+            setStatus("Ready.");
+            showToast("Saved to Cloud successfully!");
+          } else {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+        } catch (e) {
           setStatus("Cloud save failed.");
           showToast("Error saving to cloud: " + e.message);
         }
       },
+
       async loadFromCloud() {
-        const auth = this.getAuth();
-        if(!auth) return showToast("Please setup cloud configuration URL.");
-        
-        setStatus("Loading from cloud...");
+        const cfg = this.getConfig();
+        if (!cfg.url) return showToast("Please set up the Cloudflare Worker URL in ⚙️ Setup.");
+
+        setStatus("Loading from cloud via Cloudflare Worker...");
         try {
-          const res = await fetch(auth.url, { method: 'GET', headers: auth.headers });
-          if(res.ok) {
+          const res = await fetch(cfg.url, {
+            method: 'GET',
+            headers: this._buildHeaders()
+          });
+          if (res.ok) {
             const data = await res.text();
             AppStore.loadData(data);
             setStatus("Ready.");
           } else {
-            throw new Error(res.statusText);
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
           }
-        } catch(e) {
+        } catch (e) {
           setStatus("Cloud load failed.");
           showToast("Error loading from cloud: " + e.message);
         }
       }
     };
 
-    // REQUIREMENT C: Fast CDN OCR & Heuristic Parser Engine
-    function parseTransactionsFromText(text, estYear) {
-      const lines = text.split("\n");
-      const parsedItems = [];
-      
-      // Flexible matches for dates: DD/MM, DD/MM/YYYY, DD.MM.YYYY, DD-MM-YYYY, DD MMM (e.g. 12 May)
-      const dateRegex = /\b(\d{1,2})[\/\-\.](\d{1,2}|\w{3})([\/\-\.](\d{2,4}))?\b/;
-      // Matches typical statement numeric amounts at the end of text lines
-      const amountRegex = /([-+]?[\d,]+\.\d{2}[+-]?|\([\d,]+\.\d{2}\))$/;
-      
-      for(const line of lines) {
-         let cl = line.trim().replace(/\s{2,}/g, " ");
-         if(!cl) continue;
-         
-         const amtMatch = cl.match(amountRegex);
-         if(amtMatch) {
-            const rawAmt = amtMatch[1];
-            const restOfLine = cl.substring(0, cl.lastIndexOf(rawAmt)).trim();
-            
-            const dateMatch = restOfLine.match(dateRegex);
-            if(dateMatch) {
-               const rawDate = dateMatch[0];
-               const details = restOfLine.replace(rawDate, "").trim();
-               
-               let dateIso = "";
-               if (rawDate.includes('/') || rawDate.includes('-') || rawDate.includes('.')) {
-                  const delimiter = rawDate.includes('/') ? '/' : (rawDate.includes('-') ? '-' : '.');
-                  const parts = rawDate.split(delimiter);
-                  if (parts.length >= 2) {
-                     const day = parts[0].padStart(2, "0");
-                     let month = parts[1];
-                     if (isNaN(month)) {
-                        const mIdx = MMM.findIndex(m => m.toLowerCase() === month.toLowerCase().substring(0,3));
-                        month = mIdx !== -1 ? String(mIdx+1).padStart(2, "0") : "01";
-                     } else {
-                        month = month.padStart(2, "0");
-                     }
-                     const yr = parts[2] ? (parts[2].length === 2 ? "20" + parts[2] : parts[2]) : estYear;
-                     dateIso = `${yr}-${month}-${day}`;
-                  }
-               }
-               
-               if(!dateIso) {
-                  dateIso = normalizeToISODate(rawDate);
-               }
-               
-               parsedItems.push({
-                  date: dateIso || rawDate,
-                  details: details || "Transaction Record",
-                  amount: parseAmountRaw(rawAmt),
-                  remark: ""
-               });
-            }
-         }
-      }
-      return parsedItems;
-    }
-
-    async function pdfExtractText(file) {
-      setProgress(5, "Loading PDF library...");
-      const arr = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({data: arr}).promise;
-      let fullText = "";
-      
-      setProgress(15, "Extracting PDF text layer...");
-      for(let i=1; i<=pdf.numPages; i++){
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const strings = content.items.map(it => it.str);
-        fullText += strings.join(" ") + "\n";
-      }
-
-      const yearCands = yearCandidatesFromText(fullText);
-      const estYear = yearCands.length > 0 ? yearCands[yearCands.length-1] : new Date().getFullYear();
-      
-      setProgress(40, "Parsing statement text layout...");
-      let parsedItems = parseTransactionsFromText(fullText, estYear);
-
-      // Deep OCR fallback for scanned (non-searchable) PDF statement files
-      if(parsedItems.length === 0 && fullText.trim().length < 50) {
-         setProgress(45, "Scanned PDF. Booting Web-Worker OCR engine...");
-         try {
-           const worker = await Tesseract.createWorker('eng', 1, {
-              workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-              corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0/tesseract-core.wasm.js'
-           });
-           
-           let ocrText = "";
-           for(let i=1; i<=pdf.numPages; i++) {
-             const progressPct = 45 + Math.round((i / pdf.numPages) * 45);
-             setProgress(progressPct, `Performing deep OCR on Page ${i}/${pdf.numPages}...`);
-             const page = await pdf.getPage(i);
-             
-             // Render PDF canvas at 2x resolution to optimize text resolution and avoid character loss
-             const viewport = page.getViewport({ scale: 2.0 });
-             const canvas = document.createElement('canvas');
-             const context = canvas.getContext('2d');
-             canvas.height = viewport.height;
-             canvas.width = viewport.width;
-             
-             await page.render({ canvasContext: context, viewport: viewport }).promise;
-             
-             const { data: { text } } = await worker.recognize(canvas);
-             ocrText += text + "\n";
-           }
-           await worker.terminate();
-           fullText = ocrText;
-           parsedItems = parseTransactionsFromText(fullText, estYear);
-         } catch (ocrError) {
-           console.error("OCR Failed:", ocrError);
-           showToast("OCR processing failed: " + ocrError.message);
-         }
-      }
-      
-      setProgress(100, "Done.");
-      return { raw: fullText, items: parsedItems, year: estYear };
-    }
-
-    async function processExcelCsv(file) {
-      setProgress(10, "Reading spreadsheet...");
-      const arr = await file.arrayBuffer();
-      const wb = XLSX.read(arr, {type:'array', cellDates:true});
-      setProgress(50, "Mapping headers...");
-      return wb;
-    }
-
-    let previewData = [];
-    let currentWb = null;
-    
+    // ─────────────────────────────────────────────
+    // FILE HANDLING
+    // ─────────────────────────────────────────────
     document.getElementById("btnPick").onclick = () => document.getElementById("filePick").click();
     document.getElementById("filePick").onchange = (e) => {
       const f = e.target.files[0];
@@ -796,7 +880,6 @@
       e.target.value = "";
     };
     
-    // Drag and drop
     const dz = document.getElementById("dropZone");
     dz.ondragover = e => { e.preventDefault(); dz.classList.add("drag"); };
     dz.ondragleave = e => { e.preventDefault(); dz.classList.remove("drag"); };
@@ -821,7 +904,6 @@
           document.getElementById('pdfSection').style.display = 'none';
           currentWb = await processExcelCsv(file);
           
-          // Populate Sheets dropdown
           const shSel = document.getElementById('mapSheet');
           shSel.innerHTML = "";
           currentWb.SheetNames.forEach(n => {
@@ -832,7 +914,6 @@
           shSel.onchange = () => populateCols(currentWb.Sheets[shSel.value]);
           populateCols(currentWb.Sheets[currentWb.SheetNames[0]]);
           
-          // Wait for user to map cols and click rebuild
           previewData = [];
           renderPreview();
         } else {
@@ -888,10 +969,8 @@
             let cred = cCred > -1 ? parseAmountRaw(row[cCred]) : 0;
             amt = deb > 0 ? deb : -Math.abs(cred);
          }
-         
          const rawDate = cDate > -1 ? row[cDate] : "";
-         if(!rawDate) continue; // skip empty dates
-         
+         if(!rawDate) continue;
          previewData.push({
            date: normalizeToISODate(rawDate, dateOrder),
            details: cDet > -1 ? (row[cDet]||"") : "",
@@ -936,12 +1015,14 @@
       setStatus("Ready.");
     };
 
+    // ─────────────────────────────────────────────
+    // RENDER
+    // ─────────────────────────────────────────────
     function renderTabs() {
       const tb = document.getElementById("monthTabs");
       tb.innerHTML = "";
       const months = Object.keys(AppStore.data).sort().reverse();
       
-      // Update Filters
       const yf = document.getElementById("yearFilter");
       const mf = document.getElementById("monthNameFilter");
       yf.innerHTML = '<option value="">All</option>';
@@ -1047,6 +1128,9 @@
       });
     }
 
+    // ─────────────────────────────────────────────
+    // MONTH SETTINGS
+    // ─────────────────────────────────────────────
     document.getElementById("btnApplyMonth").onclick = () => {
       if(!AppStore.activeMonth) return showToast("Select a month tab first.");
       const op = document.getElementById("openingInput").value;
@@ -1060,16 +1144,17 @@
        const det = document.getElementById("mDetails").value;
        const amt = parseAmountRaw(document.getElementById("mAmount").value);
        const rm = document.getElementById("mRemark").value;
-       
        if(!d || !det || amt === 0) return showToast("Please fill Date, Details, and a valid Amount.");
        AppStore.addItems([{date:d, details:det, amount:amt, remark:rm}]);
-       
        document.getElementById("mDetails").value = "";
        document.getElementById("mAmount").value = "";
        document.getElementById("mRemark").value = "";
        showToast("Manual entry added.");
     };
 
+    // ─────────────────────────────────────────────
+    // EDIT MODAL
+    // ─────────────────────────────────────────────
     let editingItem = null;
     window.openEdit = (mKey, id) => {
       const item = AppStore.data[mKey].items.find(i=>i.id===id);
@@ -1096,6 +1181,9 @@
        showToast("Entry updated.");
     };
 
+    // ─────────────────────────────────────────────
+    // CALENDAR
+    // ─────────────────────────────────────────────
     const calPop = document.getElementById("calPop");
     let calView = new Date();
     document.getElementById("calOpenBtn").onclick = () => {
@@ -1109,10 +1197,8 @@
        document.getElementById("calTitle").textContent = `${MMM[m]} ${y}`;
        const grid = document.getElementById("calGrid");
        grid.innerHTML = '<div class="calDow">Su</div><div class="calDow">Mo</div><div class="calDow">Tu</div><div class="calDow">We</div><div class="calDow">Th</div><div class="calDow">Fr</div><div class="calDow">Sa</div>';
-       
        const firstDay = new Date(y,m,1).getDay();
        const daysInMonth = new Date(y,m+1,0).getDate();
-       
        for(let i=0; i<firstDay; i++) grid.innerHTML += `<div class="calDay mutedDay"></div>`;
        for(let d=1; d<=daysInMonth; d++) {
           const div = document.createElement("div");
@@ -1130,6 +1216,9 @@
     document.getElementById("calPrev").onclick = () => { calView.setMonth(calView.getMonth()-1); renderCalendar(); };
     document.getElementById("calNext").onclick = () => { calView.setMonth(calView.getMonth()+1); renderCalendar(); };
 
+    // ─────────────────────────────────────────────
+    // CLOUD SETTINGS MODAL
+    // ─────────────────────────────────────────────
     document.getElementById("btnCloudSettings").onclick = () => {
        const cfg = CloudStore.getConfig();
        document.getElementById("cloudUrl").value = cfg.url;
@@ -1151,15 +1240,20 @@
     document.getElementById("btnLoadCloud").onclick = () => CloudStore.loadFromCloud();
     document.getElementById("btnSaveCloud").onclick = () => CloudStore.saveToCloud();
 
+    // ─────────────────────────────────────────────
+    // CLEAR
+    // ─────────────────────────────────────────────
     document.getElementById("btnClear").onclick = () => {
       AppStore.clearAll();
       showToast("Ledger cleared.");
     };
 
+    // ─────────────────────────────────────────────
+    // EXPORT XLSX
+    // ─────────────────────────────────────────────
     document.getElementById("btnExportXlsx").onclick = () => {
       if(Object.keys(AppStore.data).length === 0) return showToast("No data to export.");
       const wb = XLSX.utils.book_new();
-      
       for(let m in AppStore.data) {
          let runBal = AppStore.data[m].opening || 0;
          const exportData = AppStore.data[m].items.map(it => {
@@ -1173,36 +1267,30 @@
                Remark: it.remark
             };
          });
-         // Add Opening Balance as first row
          exportData.unshift({
-            Date: "Opening",
-            Details: "Opening Balance",
-            Debit: '', Credit: '',
-            Balance: AppStore.data[m].opening || 0,
-            Remark: ""
+            Date: "Opening", Details: "Opening Balance",
+            Debit: '', Credit: '', Balance: AppStore.data[m].opening || 0, Remark: ""
          });
-         
          const ws = XLSX.utils.json_to_sheet(exportData);
-         XLSX.utils.book_append_sheet(wb, ws, fmtMonthMMM(m)); // REQUIREMENT A
+         XLSX.utils.book_append_sheet(wb, ws, fmtMonthMMM(m));
       }
       XLSX.writeFile(wb, "Ledger_Export.xlsx");
       showToast("Exported to Excel.");
     };
 
+    // ─────────────────────────────────────────────
+    // EXPORT PDF
+    // ─────────────────────────────────────────────
     document.getElementById("btnExportPdf").onclick = () => {
       if(Object.keys(AppStore.data).length === 0) return showToast("No data to export.");
       if(!window.jspdf) return showToast("PDF library still loading, please wait.");
-      
       const { jsPDF } = window.jspdf;
       const doc = new jsPDF();
-      
       doc.setFontSize(16);
       doc.text("Ledger Export", 14, 20);
       doc.setFontSize(10);
       doc.setTextColor(100);
-      
       let finalY = 30;
-      
       for(let m in AppStore.data) {
          let runBal = AppStore.data[m].opening || 0;
          const tableBody = AppStore.data[m].items.map(it => {
@@ -1215,9 +1303,7 @@
                fmt(runBal)
             ];
          });
-         
          doc.text(`${fmtMonthMMM(m)} - Opening: ${fmt(AppStore.data[m].opening||0)}`, 14, finalY);
-         
          doc.autoTable({
            startY: finalY + 5,
            head: [['Date', 'Details', 'Debit (+)', 'Credit (-)', 'Balance']],
@@ -1226,20 +1312,15 @@
            headStyles: { fillColor: [124, 92, 255] },
            margin: { left: 14 }
          });
-         
          finalY = doc.lastAutoTable.finalY + 15;
-         if(finalY > 260) {
-            doc.addPage();
-            finalY = 20;
-         }
+         if(finalY > 260) { doc.addPage(); finalY = 20; }
       }
       doc.save("Ledger_Export.pdf");
       showToast("Exported to PDF.");
     };
     
-    // Boot up
+    // Boot
     window.onload = () => AppStore.init();
-
   </script>
 </body>
 </html>
