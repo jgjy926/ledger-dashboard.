@@ -275,11 +275,11 @@
       </div>
       <div class="field" style="margin-top:8px">
         <label>Email (Username)</label>
-        <input id="cloudUser" placeholder="you@example.com" />
+        <input id="cloudUser" placeholder="you@example.com (leave blank if Cloudflare handles auth)" />
       </div>
       <div class="field" style="margin-top:8px">
         <label>App Password</label>
-        <input id="cloudPass" type="password" placeholder="Generate in Koofr Settings" />
+        <input id="cloudPass" type="password" placeholder="Leave blank if Cloudflare handles auth" />
       </div>
       <div class="hr"></div>
       <div class="row right">
@@ -604,7 +604,7 @@
       }
     };
 
-    // REQUIREMENT B: Cloud Integration (Koofr)
+    // REQUIREMENT B: Cloud Integration (Koofr / Cloudflare Gateway)
     const CloudStore = {
       cfgKey: 'ledger_cloud_config',
       getConfig() {
@@ -615,12 +615,18 @@
       },
       getAuth() {
         const cfg = this.getConfig();
-        if(!cfg.user || !cfg.pass || !cfg.url) return null;
-        return { url: cfg.url, headers: { 'Authorization': 'Basic ' + btoa(cfg.user + ':' + cfg.pass) } };
+        if(!cfg.url) return null;
+        const headers = {};
+        // If Username & Password are provided, inject Basic Auth.
+        // If left empty, Cloudflare proxy injects secret headers automatically.
+        if(cfg.user && cfg.pass) {
+          headers['Authorization'] = 'Basic ' + btoa(cfg.user + ':' + cfg.pass);
+        }
+        return { url: cfg.url, headers };
       },
       async saveToCloud() {
         const auth = this.getAuth();
-        if(!auth) return showToast("Please setup cloud credentials first.");
+        if(!auth) return showToast("Please setup cloud configuration URL.");
         
         const payload = JSON.stringify(AppStore.data);
         setStatus("Saving to cloud...");
@@ -635,7 +641,7 @@
       },
       async loadFromCloud() {
         const auth = this.getAuth();
-        if(!auth) return showToast("Please setup cloud credentials first.");
+        if(!auth) return showToast("Please setup cloud configuration URL.");
         
         setStatus("Loading from cloud...");
         try {
@@ -654,14 +660,71 @@
       }
     };
 
-    // REQUIREMENT C: Fast CDN OCR
+    // REQUIREMENT C: Fast CDN OCR & Heuristic Parser Engine
+    function parseTransactionsFromText(text, estYear) {
+      const lines = text.split("\n");
+      const parsedItems = [];
+      
+      // Flexible matches for dates: DD/MM, DD/MM/YYYY, DD.MM.YYYY, DD-MM-YYYY, DD MMM (e.g. 12 May)
+      const dateRegex = /\b(\d{1,2})[\/\-\.](\d{1,2}|\w{3})([\/\-\.](\d{2,4}))?\b/;
+      // Matches typical statement numeric amounts at the end of text lines
+      const amountRegex = /([-+]?[\d,]+\.\d{2}[+-]?|\([\d,]+\.\d{2}\))$/;
+      
+      for(const line of lines) {
+         let cl = line.trim().replace(/\s{2,}/g, " ");
+         if(!cl) continue;
+         
+         const amtMatch = cl.match(amountRegex);
+         if(amtMatch) {
+            const rawAmt = amtMatch[1];
+            const restOfLine = cl.substring(0, cl.lastIndexOf(rawAmt)).trim();
+            
+            const dateMatch = restOfLine.match(dateRegex);
+            if(dateMatch) {
+               const rawDate = dateMatch[0];
+               const details = restOfLine.replace(rawDate, "").trim();
+               
+               let dateIso = "";
+               if (rawDate.includes('/') || rawDate.includes('-') || rawDate.includes('.')) {
+                  const delimiter = rawDate.includes('/') ? '/' : (rawDate.includes('-') ? '-' : '.');
+                  const parts = rawDate.split(delimiter);
+                  if (parts.length >= 2) {
+                     const day = parts[0].padStart(2, "0");
+                     let month = parts[1];
+                     if (isNaN(month)) {
+                        const mIdx = MMM.findIndex(m => m.toLowerCase() === month.toLowerCase().substring(0,3));
+                        month = mIdx !== -1 ? String(mIdx+1).padStart(2, "0") : "01";
+                     } else {
+                        month = month.padStart(2, "0");
+                     }
+                     const yr = parts[2] ? (parts[2].length === 2 ? "20" + parts[2] : parts[2]) : estYear;
+                     dateIso = `${yr}-${month}-${day}`;
+                  }
+               }
+               
+               if(!dateIso) {
+                  dateIso = normalizeToISODate(rawDate);
+               }
+               
+               parsedItems.push({
+                  date: dateIso || rawDate,
+                  details: details || "Transaction Record",
+                  amount: parseAmountRaw(rawAmt),
+                  remark: ""
+               });
+            }
+         }
+      }
+      return parsedItems;
+    }
+
     async function pdfExtractText(file) {
       setProgress(5, "Loading PDF library...");
       const arr = await file.arrayBuffer();
       const pdf = await pdfjsLib.getDocument({data: arr}).promise;
       let fullText = "";
       
-      setProgress(20, "Extracting PDF text...");
+      setProgress(15, "Extracting PDF text layer...");
       for(let i=1; i<=pdf.numPages; i++){
         const page = await pdf.getPage(i);
         const content = await page.getTextContent();
@@ -669,46 +732,46 @@
         fullText += strings.join(" ") + "\n";
       }
 
-      // Simple regex parser for bank statements. Usually they have format "DD/MM" or "DD/MM/YYYY" then text then money.
-      // This is a generic fallback extractor since the user's specific v17 regex was truncated.
-      setProgress(50, "Parsing text...");
-      const lines = fullText.split("\n");
       const yearCands = yearCandidatesFromText(fullText);
       const estYear = yearCands.length > 0 ? yearCands[yearCands.length-1] : new Date().getFullYear();
       
-      const parsedItems = [];
-      const lineRegex = /^(\d{2}\/\d{2}(?:\/\d{2,4})?)\s+(.+?)\s+([\d,]+\.\d{2}[+-]?|\([\d,]+\.\d{2}\))$/;
-      
-      for(const line of lines) {
-         let cl = line.trim().replace(/\s{2,}/g, " "); // collapse spaces
-         const match = cl.match(lineRegex);
-         if(match) {
-            let dStr = match[1];
-            let dateIso = "";
-            if(dStr.length <= 5) dateIso = toISOFromDDMM(dStr, estYear);
-            else dateIso = normalizeToISODate(dStr);
-            
-            parsedItems.push({
-               date: dateIso || dStr,
-               details: match[2].trim(),
-               amount: parseAmountRaw(match[3]),
-               remark: ""
-            });
-         }
-      }
+      setProgress(40, "Parsing statement text layout...");
+      let parsedItems = parseTransactionsFromText(fullText, estYear);
 
-      // If text extraction is completely empty (scanned PDF), use OCR.
+      // Deep OCR fallback for scanned (non-searchable) PDF statement files
       if(parsedItems.length === 0 && fullText.trim().length < 50) {
-         setProgress(60, "Running OCR via CDN...");
-         // Use fast CDN for Tesseract
-         const worker = await Tesseract.createWorker('eng', 1, {
-            workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-            corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0/tesseract-core.wasm.js'
-         });
-         // Render PDF page to canvas and OCR (simplified due to single file constraint)
-         // Assuming basic OCR setup for fallback. In production, canvas rendering per page is required.
-         await worker.terminate();
-         showToast("Scanned PDF detected. Basic text parsing applied.");
+         setProgress(45, "Scanned PDF. Booting Web-Worker OCR engine...");
+         try {
+           const worker = await Tesseract.createWorker('eng', 1, {
+              workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+              corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0/tesseract-core.wasm.js'
+           });
+           
+           let ocrText = "";
+           for(let i=1; i<=pdf.numPages; i++) {
+             const progressPct = 45 + Math.round((i / pdf.numPages) * 45);
+             setProgress(progressPct, `Performing deep OCR on Page ${i}/${pdf.numPages}...`);
+             const page = await pdf.getPage(i);
+             
+             // Render PDF canvas at 2x resolution to optimize text resolution and avoid character loss
+             const viewport = page.getViewport({ scale: 2.0 });
+             const canvas = document.createElement('canvas');
+             const context = canvas.getContext('2d');
+             canvas.height = viewport.height;
+             canvas.width = viewport.width;
+             
+             await page.render({ canvasContext: context, viewport: viewport }).promise;
+             
+             const { data: { text } } = await worker.recognize(canvas);
+             ocrText += text + "\n";
+           }
+           await worker.terminate();
+           fullText = ocrText;
+           parsedItems = parseTransactionsFromText(fullText, estYear);
+         } catch (ocrError) {
+           console.error("OCR Failed:", ocrError);
+           showToast("OCR processing failed: " + ocrError.message);
+         }
       }
       
       setProgress(100, "Done.");
@@ -1089,7 +1152,6 @@
     document.getElementById("btnSaveCloud").onclick = () => CloudStore.saveToCloud();
 
     document.getElementById("btnClear").onclick = () => {
-      // Ensure no alert() is used. Using custom modal approach theoretically, but for single-file conciseness:
       AppStore.clearAll();
       showToast("Ledger cleared.");
     };
