@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Online Multi‑Month Ledger (v21 Export Fix)</title>
+  <title>Online Multi‑Month Ledger (v184 Modular)</title>
   <link rel="icon" href="data:," />
 
   <style>
@@ -22,7 +22,7 @@
     @media (max-width: 980px){ .grid{grid-template-columns:1fr} }
     .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px}
     .hr{height:1px;background:var(--line);margin:12px 0;opacity:.9}
-    
+
     button{padding:9px 12px;border-radius:12px;border:1px solid rgba(255,255,255,.22);background:#1b243c;color:var(--text);cursor:pointer; transition: all 0.2s;}
     button:hover{background:#334}
     button:disabled{opacity:0.55;cursor:not-allowed}
@@ -69,6 +69,10 @@
     th{opacity:.9;text-align:left}
     .actions button{padding:6px 10px;border-radius:10px}
 
+    /* Unsaved-changes / sync reminder banner */
+    .syncBanner{margin-top:12px;border:1px solid var(--warn);background:rgba(255,210,77,.10);border-radius:16px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+    .syncBanner span{font-size:13px;color:var(--warn)}
+
     .modalMask{position:fixed;inset:0;background:rgba(0,0,0,.75);display:none;align-items:center;justify-content:center;padding:16px;z-index:50; backdrop-filter: blur(4px);}
     .modal{width:min(1100px,100%);max-height:85vh;overflow:auto;background:var(--panel2);border:1px solid var(--line);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.4);padding:14px}
     .modal-sm {width:min(450px, 100%);}
@@ -101,13 +105,19 @@
   <div class="wrap">
     <div class="row space">
       <div>
-        <h2 style="margin:0">Online Multi‑Month Ledger (v21 Export Fix)</h2>
+        <h2 style="margin:0">Online Multi‑Month Ledger (v184 Modular)</h2>
         <div class="muted">Smart mapping • Date normalization • Koofr Cloud Sync • Fast CDN OCR</div>
       </div>
       <div class="row right">
         <span class="pill" id="periodPill">Period: All</span>
         <span class="pill">Rule: + Debit, − Credit</span>
       </div>
+    </div>
+
+    <!-- Unsaved-changes reminder (shown when ledger differs from last cloud sync) -->
+    <div id="syncBanner" class="syncBanner" style="display:none">
+      <span>⚠ You have unsaved changes — click ☁ Save to sync to the cloud.</span>
+      <button id="btnBannerSave" class="primary">☁ Save now</button>
     </div>
 
     <div class="grid" style="margin-top:12px">
@@ -286,8 +296,9 @@
         <input id="cloudUser" placeholder="you@example.com" />
       </div>
       <div class="field" style="margin-top:8px">
-        <label>Koofr App Password (stored in Worker secret — leave blank if already set there)</label>
+        <label>Koofr App Password (session only — never saved to this device)</label>
         <input id="cloudPass" type="password" placeholder="Leave blank if Worker secret handles auth" />
+        <div class="mini">For your security the password is kept in memory for this session only and is cleared on reload. Prefer storing it as a Worker secret.</div>
       </div>
       <div class="hr"></div>
       <div class="row right">
@@ -391,6 +402,25 @@
     </div>
   </div>
 
+  <!-- Add Record Modal (NEW — wires the previously-dead "Add Record" button) -->
+  <div class="modalMask" id="maskAdd">
+    <div class="modal modal-sm">
+      <div class="row space">
+        <div><b>Add Record</b><div class="muted">Add a new ledger entry.</div></div>
+      </div>
+      <div class="hr"></div>
+      <div class="field"><label>Date</label><input id="addDate" type="date"></div>
+      <div class="field" style="margin-top:8px"><label>Amount (RM)</label><input id="addAmount" placeholder="e.g. 10.00 or 10.00-"></div>
+      <div class="field" style="margin-top:8px"><label>Details</label><input id="addDetails" placeholder="e.g. Grocery / Transfer / Payment"></div>
+      <div class="field" style="margin-top:8px"><label>Remark</label><input id="addRemark" placeholder="optional"></div>
+      <div class="hr"></div>
+      <div class="row right">
+        <button class="ghost" id="btnAddCancel">Cancel</button>
+        <button class="primary" id="btnAddSave">Save Record</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modalMask" id="maskEdit">
     <div class="modal modal-sm">
       <div class="row space">
@@ -411,350 +441,367 @@
 
   <div id="toastContainer"></div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+  <!--
+    CDN libraries with Subresource Integrity (SRI).
+    If a CDN file is tampered with, the browser refuses to execute it.
+    Hashes are pinned to the exact versions below (from cdnjs SRI metadata).
+  -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"
+          integrity="sha512-tqaIiFJopq4lTBmFlWF0MNzzTpDsHyug8tJaaY0VkcH5AR2ANMJlcD+3fIL+RQ4JU3K6edt9OoySKfCCyKgkng=="
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <script>
     if (window.pdfjsLib) {
+      // pdf.js loads the worker via this URL internally; SRI attributes don't apply to it.
       pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
     }
   </script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"
+          integrity="sha512-r22gChDnGvBylk90+2e/ycr3RVrDi8DIOkIGNhJlKfuyQM4tIRAI062MaV8sfjQKYVGjOBaZBOA87z+IhZE9DA=="
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"
+          integrity="sha512-qZvrmS2ekKPF2mSznTQsxqPgnpkI4DNTlrdUmTzrDgektczlKNRRhy5X5AAOnx5S09ydFYWWNSfcEqDTTHgtNA=="
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"
+          integrity="sha512-03CCNkeosDFN2zCCu4vLpu3pJfZcrL48F3yB8k87ejT+OVMwco7IH3FW02vtbGhdncS6gyYZ/duYaC/K62xQPQ=="
+          crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <!--
+    tesseract.js is intentionally left without SRI: it uses an unpinned major (@5)
+    and dynamically fetches worker.min.js / tesseract-core.wasm.js at runtime, which
+    SRI on this tag cannot cover. Keep the major pinned and review periodically.
+  -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" crossorigin="anonymous"></script>
 
   <script>
+    "use strict";
+
     // ─────────────────────────────────────────────
-    // UTILITIES
+    // Module: Utils — formatting, parsing, status & toast helpers
     // ─────────────────────────────────────────────
-    function setStatus(msg){ document.getElementById("status").textContent = msg; }
-    function setProgress(pct,msg){
-      document.getElementById("progFill").style.width = Math.max(0,Math.min(100,pct))+"%";
-      document.getElementById("progText").textContent = Math.round(pct)+"%";
-      if(msg) setStatus(msg);
-    }
-    function showToast(msg) {
-      const container = document.getElementById('toastContainer');
-      const toast = document.createElement('div');
-      toast.className = 'toast';
-      toast.textContent = msg;
-      container.appendChild(toast);
-      setTimeout(() => { toast.style.opacity = '0'; setTimeout(()=>toast.remove(), 300); }, 3000);
-    }
-    
-    function fmt(n){ return "RM " + Number(n||0).toFixed(2); }
-    function escapeHtml(s){
-      return String(s ?? "")
-        .replaceAll("&","&amp;")
-        .replaceAll("<","&lt;")
-        .replaceAll(">","&gt;")
-        .replaceAll('"',"&quot;")
-        .replaceAll("'","&#039;");
-    }
+    const Utils = (() => {
+      const MMM = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-    function parseAmountRaw(raw){
-      let s=String(raw??"").trim();
-      if(!s) return 0;
-      s=s.replace(/RM\s*/ig,"").replace(/\s+/g,"");
-      let sign=1;
-      if(/[+-]$/.test(s)){ sign=s.endsWith("-")?-1:1; s=s.slice(0,-1); }
-      if(/^\(.*\)$/.test(s)){ sign=-1; s=s.slice(1,-1); }
-      if(/^[+-]/.test(s)){ sign=s.startsWith("-")?-1:1; s=s.slice(1); }
-      s=s.replace(/,/g,"");
-      const n=Number(s);
-      return isFinite(n)?n*sign:0;
-    }
-    
-    function computeDebitCredit(records){
-      let debit=0, credit=0;
-      for(const r of records){ const a=Number(r.amount||0); if(a>0) debit+=a; if(a<0) credit+=Math.abs(a); }
-      return {count:records.length, debit, credit};
-    }
-
-    const MMM = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-    
-    function fmtMonthMMM(monthISO){
-      const m=String(monthISO||"").match(/^(\d{4})-(\d{2})$/);
-      if(!m) return monthISO||"";
-      return `${MMM[Number(m[2])-1]||"??"}.${m[1]}`;
-    }
-    
-    function fmtDateDDMMMYYYY(iso){
-      const m=String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);
-      if(!m) return iso||"";
-      return `${m[3]}.${MMM[Number(m[2])-1]||"??"}.${m[1]}`;
-    }
-
-    function yearCandidatesFromText(s){
-      const yrs=Array.from(new Set((String(s||"").match(/\b20\d{2}\b/g)||[]).map(x=>Number(x)).filter(n=>n>=2000&&n<=2099)));
-      yrs.sort((a,b)=>a-b); return yrs;
-    }
-
-    function normalizeToISODate(val, order="DMY"){
-      if(val === null || val === undefined || val === "") return "";
-      if(val instanceof Date && !isNaN(val.getTime())){
-        const y=val.getFullYear();
-        const m=String(val.getMonth()+1).padStart(2,"0");
-        const d=String(val.getDate()).padStart(2,"0");
-        return `${y}-${m}-${d}`;
+      function setStatus(msg){ document.getElementById("status").textContent = msg; }
+      function setProgress(pct,msg){
+        document.getElementById("progFill").style.width = Math.max(0,Math.min(100,pct))+"%";
+        document.getElementById("progText").textContent = Math.round(pct)+"%";
+        if(msg) setStatus(msg);
       }
-      if(typeof val === "number" && isFinite(val)){
-        const base = Date.UTC(1899, 11, 30);
-        const ms = base + Math.round(val * 86400000);
-        const d = new Date(ms);
-        return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}`;
+      function showToast(msg) {
+        const container = document.getElementById('toastContainer');
+        const toast = document.createElement('div');
+        toast.className = 'toast';
+        toast.textContent = msg;
+        container.appendChild(toast);
+        setTimeout(() => { toast.style.opacity = '0'; setTimeout(()=>toast.remove(), 300); }, 3000);
       }
-      let s = String(val).trim().replace(/[-\.]/g, "/");
-      const parts = s.split("/");
-      if(parts.length===3) {
-        let p1=Number(parts[0]), p2=Number(parts[1]), p3=Number(parts[2]);
-        if(p3<100) p3+=2000;
-        let y,m,d;
-        if(order==="YMD"){ y=p1; m=p2; d=p3; }
-        else if(order==="MDY"){ m=p1; d=p2; y=p3; }
-        else { d=p1; m=p2; y=p3; }
-        if(y>1900 && y<2100 && m>=1 && m<=12 && d>=1 && d<=31) {
-            return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+
+      function fmt(n){ return "RM " + Number(n||0).toFixed(2); }
+      function escapeHtml(s){
+        return String(s ?? "")
+          .replaceAll("&","&amp;")
+          .replaceAll("<","&lt;")
+          .replaceAll(">","&gt;")
+          .replaceAll('"',"&quot;")
+          .replaceAll("'","&#039;");
+      }
+
+      function parseAmountRaw(raw){
+        let s=String(raw??"").trim();
+        if(!s) return 0;
+        s=s.replace(/RM\s*/ig,"").replace(/\s+/g,"");
+        let sign=1;
+        if(/[+-]$/.test(s)){ sign=s.endsWith("-")?-1:1; s=s.slice(0,-1); }
+        if(/^\(.*\)$/.test(s)){ sign=-1; s=s.slice(1,-1); }
+        if(/^[+-]/.test(s)){ sign=s.startsWith("-")?-1:1; s=s.slice(1); }
+        s=s.replace(/,/g,"");
+        const n=Number(s);
+        return isFinite(n)?n*sign:0;
+      }
+
+      function computeDebitCredit(records){
+        let debit=0, credit=0;
+        for(const r of records){ const a=Number(r.amount||0); if(a>0) debit+=a; if(a<0) credit+=Math.abs(a); }
+        return {count:records.length, debit, credit};
+      }
+
+      function fmtMonthMMM(monthISO){
+        const m=String(monthISO||"").match(/^(\d{4})-(\d{2})$/);
+        if(!m) return monthISO||"";
+        return `${MMM[Number(m[2])-1]||"??"}.${m[1]}`;
+      }
+
+      function fmtDateDDMMMYYYY(iso){
+        const m=String(iso||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if(!m) return iso||"";
+        return `${m[3]}.${MMM[Number(m[2])-1]||"??"}.${m[1]}`;
+      }
+
+      function yearCandidatesFromText(s){
+        const yrs=Array.from(new Set((String(s||"").match(/\b20\d{2}\b/g)||[]).map(x=>Number(x)).filter(n=>n>=2000&&n<=2099)));
+        yrs.sort((a,b)=>a-b); return yrs;
+      }
+
+      function normalizeToISODate(val, order="DMY"){
+        if(val === null || val === undefined || val === "") return "";
+        if(val instanceof Date && !isNaN(val.getTime())){
+          const y=val.getFullYear();
+          const m=String(val.getMonth()+1).padStart(2,"0");
+          const d=String(val.getDate()).padStart(2,"0");
+          return `${y}-${m}-${d}`;
         }
+        if(typeof val === "number" && isFinite(val)){
+          const base = Date.UTC(1899, 11, 30);
+          const ms = base + Math.round(val * 86400000);
+          const d = new Date(ms);
+          return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}`;
+        }
+        let s = String(val).trim().replace(/[-\.]/g, "/");
+        const parts = s.split("/");
+        if(parts.length===3) {
+          let p1=Number(parts[0]), p2=Number(parts[1]), p3=Number(parts[2]);
+          if(p3<100) p3+=2000;
+          let y,m,d;
+          if(order==="YMD"){ y=p1; m=p2; d=p3; }
+          else if(order==="MDY"){ m=p1; d=p2; y=p3; }
+          else { d=p1; m=p2; y=p3; }
+          if(y>1900 && y<2100 && m>=1 && m<=12 && d>=1 && d<=31) {
+              return `${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+          }
+        }
+        return "";
       }
-      return "";
-    }
+
+      return {
+        MMM, setStatus, setProgress, showToast, fmt, escapeHtml, parseAmountRaw,
+        computeDebitCredit, fmtMonthMMM, fmtDateDDMMMYYYY, yearCandidatesFromText, normalizeToISODate
+      };
+    })();
+
+    // Convenience local bindings (used throughout the modules below)
+    const { MMM, setStatus, setProgress, showToast, fmt, escapeHtml, parseAmountRaw,
+            computeDebitCredit, fmtMonthMMM, fmtDateDDMMMYYYY, yearCandidatesFromText, normalizeToISODate } = Utils;
+
+    // ── Globals exposed for inline HTML event handlers ───────────────────────
+    // Inline onclick/onchange attributes in generated markup resolve names against
+    // the global object, so the few symbols they reference are exposed here.
+    //   window.parseAmountRaw → preview Amount onchange
+    //   window.AppStore       → row delete (via confirmDelete) / store access
+    //   window.openEdit       → row edit button
+    //   window.confirmDelete  → row delete button (adds a confirm step)
+    //   previewData (top-level let, below) → preview row onchange
+    window.parseAmountRaw = parseAmountRaw;
 
     // ─────────────────────────────────────────────
-    // PDF TRANSACTION PARSER  (FIX v19)
+    // Module: Parser — PDF text parsing, PDF/Excel extraction
     //
     // Bank statement layout (Maybank / CIMB / RHB style):
-    //
-    //   Col-1 (Posting Date)   Col-2 (Tx Date)   Description            Amount
-    //   ────────────────────   ───────────────   ─────────────────────  ──────
-    //   22/03                  22/03             MUSEE PLATINUM TOKYO…  133.33
-    //
-    // Both column dates are SHORT (DD/MM — no year).
-    // Year is taken from the fallbackYear detected from the PDF header.
-    //
-    // Strategy (highest → lowest priority):
-    //
-    //   PATTERN A  — Two SHORT dates at the start of the line (DD/MM  DD/MM  …)
-    //                Use the SECOND date (transaction date).  ← THIS IS THE FIX
-    //
-    //   PATTERN B  — One FULL date + one SHORT date (old two-column format where
-    //                posting date was printed in full).  Use the SHORT date.
-    //
-    //   PATTERN C  — Fallback: any single date (full or short) on the line.
+    //   Col-1 (Posting Date)  Col-2 (Tx Date)  Description           Amount
+    //   22/03                 22/03            MUSEE PLATINUM TOKYO…  133.33
+    // Both column dates are SHORT (DD/MM — no year). Year comes from the PDF header.
+    //   PATTERN A — two SHORT dates at line start → use the SECOND (tx date)
+    //   PATTERN B — one FULL date + one SHORT date → use the SHORT date
+    //   PATTERN C — fallback: any single date on the line
     // ─────────────────────────────────────────────
-    function parseTransactionsFromText(text, fallbackYear) {
-      const lines = text.split("\n");
-      const parsedItems = [];
+    const Parser = (() => {
+      function parseTransactionsFromText(text, fallbackYear) {
+        const lines = text.split("\n");
+        const parsedItems = [];
 
-      // Short date:  DD/MM  (exactly, no 4-digit year attached)
-      // Negative look-ahead prevents matching the start of a full DD/MM/YYYY.
-      const shortDateRe   = /\b(\d{1,2})\/(\d{2})(?!\/\d{2,4})\b/g;
+        const amountRe = /([-+]?[\d,]+\.\d{2}[+-]?|\([\d,]+\.\d{2}\))(?:\s*)$/;
 
-      // Full date:  DD/MM/YYYY  or  DD.MM.YYYY  or  DD-MM-YYYY
-      //             also accepts month names: 22.Apr.2026
-      const fullDateRe    = /\b(\d{1,2})[\/\-\.]([A-Za-z]{3}|\d{1,2})[\/\-\.](\d{4})\b/;
+        for (const rawLine of lines) {
+          const line = rawLine.trim().replace(/\s{2,}/g, " ");
+          if (!line) continue;
 
-      // Trailing amount (handles  123.45  /  123.45-  /  (123.45) )
-      const amountRe      = /([-+]?[\d,]+\.\d{2}[+-]?|\([\d,]+\.\d{2}\))(?:\s*)$/;
+          const amtMatch = line.match(amountRe);
+          if (!amtMatch) continue;
+          const rawAmt   = amtMatch[1];
+          const beforeAmt = line.substring(0, line.lastIndexOf(rawAmt)).trim();
 
-      for (const rawLine of lines) {
-        const line = rawLine.trim().replace(/\s{2,}/g, " ");
-        if (!line) continue;
+          // Collect all short-date matches from beforeAmt
+          const shortMatches = [];
+          let sm;
+          const tempRe = /\b(\d{1,2})\/(\d{2})(?!\/\d{2,4})\b/g;
+          while ((sm = tempRe.exec(beforeAmt)) !== null) {
+            shortMatches.push({ match: sm[0], day: sm[1], month: sm[2], index: sm.index });
+          }
 
-        const amtMatch = line.match(amountRe);
-        if (!amtMatch) continue;
-        const rawAmt   = amtMatch[1];
-        const beforeAmt = line.substring(0, line.lastIndexOf(rawAmt)).trim();
+          // ── PATTERN A: two short dates at start of line ──────────────────────
+          if (shortMatches.length >= 2) {
+            const txDate  = shortMatches[1];   // SECOND short date = transaction date
+            const txDay   = String(txDate.day).padStart(2, "0");
+            const txMonth = String(txDate.month).padStart(2, "0");
 
-        // Reset lastIndex for the global regex on every line
-        shortDateRe.lastIndex = 0;
+            if (Number(txDate.month) >= 1 && Number(txDate.month) <= 12) {
+              const dateISO = `${fallbackYear}-${txMonth}-${txDay}`;
+              const afterSecond = beforeAmt
+                .substring(txDate.index + txDate.match.length)
+                .replace(/^[^A-Za-z0-9]+/, "")
+                .trim();
 
-        // Collect all short-date matches from beforeAmt
-        const shortMatches = [];
-        let sm;
-        const tempRe = /\b(\d{1,2})\/(\d{2})(?!\/\d{2,4})\b/g;
-        while ((sm = tempRe.exec(beforeAmt)) !== null) {
-          shortMatches.push({ match: sm[0], day: sm[1], month: sm[2], index: sm.index });
-        }
+              parsedItems.push({
+                date:    dateISO,
+                details: afterSecond || "Transaction Record",
+                amount:  parseAmountRaw(rawAmt),
+                remark:  ""
+              });
+              continue;
+            }
+          }
 
-        // ── PATTERN A: two short dates at start of line ───────────────────────
-        // e.g.  "22/03 22/03 MUSEE PLATINUM TOKYO…"
-        //        ^col1  ^col2  ^description
-        if (shortMatches.length >= 2) {
-          // The SECOND short date is the transaction date
-          const txDate  = shortMatches[1];
-          const txDay   = String(txDate.day).padStart(2, "0");
-          const txMonth = String(txDate.month).padStart(2, "0");
+          // ── PATTERN B: full posting date + short transaction date ────────────
+          const fullDateRe   = /\b(\d{1,2})[\/\-\.]([A-Za-z]{3}|\d{1,2})[\/\-\.](\d{4})\b/;
+          const postingMatch = beforeAmt.match(fullDateRe);
+          const singleShort  = shortMatches[0];
 
-          // Validate month range
-          if (Number(txDate.month) >= 1 && Number(txDate.month) <= 12) {
-            const dateISO = `${fallbackYear}-${txMonth}-${txDay}`;
+          if (postingMatch && singleShort) {
+            const yearFromPosting = Number(postingMatch[3]);
+            const txYear = (yearFromPosting >= 2000 && yearFromPosting <= 2099)
+                            ? yearFromPosting : fallbackYear;
 
-            // Details = everything after the second short-date match
-            const afterSecond = beforeAmt
-              .substring(txDate.index + txDate.match.length)
+            const txDay   = String(singleShort.day).padStart(2, "0");
+            const txMonth = String(singleShort.month).padStart(2, "0");
+            const dateISO = `${txYear}-${txMonth}-${txDay}`;
+
+            const afterShortDate = beforeAmt
+              .substring(singleShort.index + singleShort.match.length)
               .replace(/^[^A-Za-z0-9]+/, "")
               .trim();
 
             parsedItems.push({
               date:    dateISO,
-              details: afterSecond || "Transaction Record",
+              details: afterShortDate || "Transaction Record",
               amount:  parseAmountRaw(rawAmt),
               remark:  ""
             });
             continue;
           }
-        }
 
-        // ── PATTERN B: full posting date + short transaction date ─────────────
-        // e.g.  "02.Apr.2026 01/04 /MUSEE PLATINUM…"
-        const postingMatch = beforeAmt.match(fullDateRe);
-        const singleShort  = shortMatches[0];
+          // ── PATTERN C: single date fallback (any format) ─────────────────────
+          const singleDateRe = /\b(\d{1,2})[\/\-\.](\d{1,2}|\w{3})([\/\-\.](\d{2,4}))?\b/;
+          const dateMatch = beforeAmt.match(singleDateRe);
+          if (dateMatch) {
+            const rawDate = dateMatch[0];
+            const details = beforeAmt.replace(rawDate, "").trim();
+            let dateISO = "";
 
-        if (postingMatch && singleShort) {
-          const yearFromPosting = Number(postingMatch[3]);
-          const txYear = (yearFromPosting >= 2000 && yearFromPosting <= 2099)
-                          ? yearFromPosting : fallbackYear;
-
-          const txDay   = String(singleShort.day).padStart(2, "0");
-          const txMonth = String(singleShort.month).padStart(2, "0");
-          const dateISO = `${txYear}-${txMonth}-${txDay}`;
-
-          const afterShortDate = beforeAmt
-            .substring(singleShort.index + singleShort.match.length)
-            .replace(/^[^A-Za-z0-9]+/, "")
-            .trim();
-
-          parsedItems.push({
-            date:    dateISO,
-            details: afterShortDate || "Transaction Record",
-            amount:  parseAmountRaw(rawAmt),
-            remark:  ""
-          });
-          continue;
-        }
-
-        // ── PATTERN C: single date fallback (any format) ──────────────────────
-        const singleDateRe = /\b(\d{1,2})[\/\-\.](\d{1,2}|\w{3})([\/\-\.](\d{2,4}))?\b/;
-        const dateMatch = beforeAmt.match(singleDateRe);
-        if (dateMatch) {
-          const rawDate = dateMatch[0];
-          const details = beforeAmt.replace(rawDate, "").trim();
-          let dateISO = "";
-
-          const delim = rawDate.includes("/") ? "/" : rawDate.includes("-") ? "-" : ".";
-          const parts = rawDate.split(delim);
-          if (parts.length >= 2) {
-            const day = parts[0].padStart(2, "0");
-            let month = parts[1];
-            if (isNaN(month)) {
-              const mIdx = MMM.findIndex(m => m.toLowerCase() === month.toLowerCase().substring(0,3));
-              month = mIdx !== -1 ? String(mIdx+1).padStart(2,"0") : "01";
-            } else {
-              month = month.padStart(2,"0");
+            const delim = rawDate.includes("/") ? "/" : rawDate.includes("-") ? "-" : ".";
+            const parts = rawDate.split(delim);
+            if (parts.length >= 2) {
+              const day = parts[0].padStart(2, "0");
+              let month = parts[1];
+              if (isNaN(month)) {
+                const mIdx = MMM.findIndex(m => m.toLowerCase() === month.toLowerCase().substring(0,3));
+                month = mIdx !== -1 ? String(mIdx+1).padStart(2,"0") : "01";
+              } else {
+                month = month.padStart(2,"0");
+              }
+              const yr = parts[2]
+                ? (parts[2].length === 2 ? "20" + parts[2] : parts[2])
+                : fallbackYear;
+              dateISO = `${yr}-${month}-${day}`;
             }
-            const yr = parts[2]
-              ? (parts[2].length === 2 ? "20" + parts[2] : parts[2])
-              : fallbackYear;
-            dateISO = `${yr}-${month}-${day}`;
+            if (!dateISO) dateISO = normalizeToISODate(rawDate);
+
+            parsedItems.push({
+              date:    dateISO || rawDate,
+              details: details || "Transaction Record",
+              amount:  parseAmountRaw(rawAmt),
+              remark:  ""
+            });
           }
-          if (!dateISO) dateISO = normalizeToISODate(rawDate);
-
-          parsedItems.push({
-            date:    dateISO || rawDate,
-            details: details || "Transaction Record",
-            amount:  parseAmountRaw(rawAmt),
-            remark:  ""
-          });
         }
-      }
-      return parsedItems;
-    }
-
-    // ─────────────────────────────────────────────
-    // PDF EXTRACTION
-    // ─────────────────────────────────────────────
-    async function pdfExtractText(file) {
-      setProgress(5, "Loading PDF library...");
-      const arr = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({data: arr}).promise;
-      let fullText = "";
-      
-      setProgress(15, "Extracting PDF text layer...");
-      for(let i=1; i<=pdf.numPages; i++){
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const strings = content.items.map(it => it.str);
-        fullText += strings.join(" ") + "\n";
+        return parsedItems;
       }
 
-      const yearCands = yearCandidatesFromText(fullText);
-      const estYear = yearCands.length > 0 ? yearCands[yearCands.length-1] : new Date().getFullYear();
-      
-      setProgress(40, "Parsing statement text layout...");
-      let parsedItems = parseTransactionsFromText(fullText, estYear);
+      async function pdfExtractText(file) {
+        setProgress(5, "Loading PDF library...");
+        const arr = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({data: arr}).promise;
+        let fullText = "";
 
-      // Deep OCR fallback for scanned (non-searchable) PDFs
-      if(parsedItems.length === 0 && fullText.trim().length < 50) {
-         setProgress(45, "Scanned PDF. Booting Web-Worker OCR engine...");
-         try {
-           const worker = await Tesseract.createWorker('eng', 1, {
-              workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
-              corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0/tesseract-core.wasm.js'
-           });
-           
-           let ocrText = "";
-           for(let i=1; i<=pdf.numPages; i++) {
-             const progressPct = 45 + Math.round((i / pdf.numPages) * 45);
-             setProgress(progressPct, `Performing deep OCR on Page ${i}/${pdf.numPages}...`);
-             const page = await pdf.getPage(i);
-             const viewport = page.getViewport({ scale: 2.0 });
-             const canvas = document.createElement('canvas');
-             const context = canvas.getContext('2d');
-             canvas.height = viewport.height;
-             canvas.width = viewport.width;
-             await page.render({ canvasContext: context, viewport: viewport }).promise;
-             const { data: { text } } = await worker.recognize(canvas);
-             ocrText += text + "\n";
+        setProgress(15, "Extracting PDF text layer...");
+        for(let i=1; i<=pdf.numPages; i++){
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const strings = content.items.map(it => it.str);
+          fullText += strings.join(" ") + "\n";
+        }
+
+        const yearCands = yearCandidatesFromText(fullText);
+        const estYear = yearCands.length > 0 ? yearCands[yearCands.length-1] : new Date().getFullYear();
+
+        setProgress(40, "Parsing statement text layout...");
+        let parsedItems = parseTransactionsFromText(fullText, estYear);
+
+        // Deep OCR fallback for scanned (non-searchable) PDFs
+        if(parsedItems.length === 0 && fullText.trim().length < 50) {
+           setProgress(45, "Scanned PDF. Booting Web-Worker OCR engine...");
+           try {
+             const worker = await Tesseract.createWorker('eng', 1, {
+                workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/worker.min.js',
+                corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.0.0/tesseract-core.wasm.js'
+             });
+
+             let ocrText = "";
+             for(let i=1; i<=pdf.numPages; i++) {
+               const progressPct = 45 + Math.round((i / pdf.numPages) * 45);
+               setProgress(progressPct, `Performing deep OCR on Page ${i}/${pdf.numPages}...`);
+               const page = await pdf.getPage(i);
+               const viewport = page.getViewport({ scale: 2.0 });
+               const canvas = document.createElement('canvas');
+               const context = canvas.getContext('2d');
+               canvas.height = viewport.height;
+               canvas.width = viewport.width;
+               await page.render({ canvasContext: context, viewport: viewport }).promise;
+               const { data: { text } } = await worker.recognize(canvas);
+               ocrText += text + "\n";
+             }
+             await worker.terminate();
+             fullText = ocrText;
+             parsedItems = parseTransactionsFromText(fullText, estYear);
+           } catch (ocrError) {
+             console.error("OCR Failed:", ocrError);
+             showToast("OCR processing failed: " + ocrError.message);
            }
-           await worker.terminate();
-           fullText = ocrText;
-           parsedItems = parseTransactionsFromText(fullText, estYear);
-         } catch (ocrError) {
-           console.error("OCR Failed:", ocrError);
-           showToast("OCR processing failed: " + ocrError.message);
-         }
+        }
+
+        setProgress(100, "Done.");
+        return { raw: fullText, items: parsedItems, year: estYear };
       }
-      
-      setProgress(100, "Done.");
-      return { raw: fullText, items: parsedItems, year: estYear };
-    }
 
-    async function processExcelCsv(file) {
-      setProgress(10, "Reading spreadsheet...");
-      const arr = await file.arrayBuffer();
-      const wb = XLSX.read(arr, {type:'array', cellDates:true});
-      setProgress(50, "Mapping headers...");
-      return wb;
-    }
+      async function processExcelCsv(file) {
+        setProgress(10, "Reading spreadsheet...");
+        const arr = await file.arrayBuffer();
+        const wb = XLSX.read(arr, {type:'array', cellDates:true});
+        setProgress(50, "Mapping headers...");
+        return wb;
+      }
+
+      return { parseTransactionsFromText, pdfExtractText, processExcelCsv };
+    })();
 
     // ─────────────────────────────────────────────
-    // APP STORE
+    // Module: AppStore — in-memory ledger data + mutations
+    //   `dirty` tracks whether data has changed since the last cloud sync.
     // ─────────────────────────────────────────────
-    let previewData = [];
-    let currentWb = null;
-    
     const AppStore = {
       data: {},
       activeMonth: null,
+      dirty: false,
       generateId: () => Date.now().toString(36) + Math.random().toString(36).substr(2,5),
-      
+
       init() { this.renderDashboard(); },
-      
+
+      markDirty() { this.dirty = true; },
+      markClean() { this.dirty = false; },
+
       loadData(jsonData) {
         try {
           const parsed = JSON.parse(jsonData);
           this.data = parsed || {};
           this.activeMonth = Object.keys(this.data).sort().reverse()[0] || null;
+          this.markClean();          // freshly loaded from cloud = in sync
           this.renderDashboard();
           showToast("Data loaded successfully.");
         } catch(e) {
@@ -762,7 +809,9 @@
         }
       },
 
+      // Returns {added, skipped} so callers can report locked-month skips.
       addItems(items) {
+        let added = 0, skipped = 0;
         items.forEach(item => {
           if(!item.date) return;
           const monthKey = item.date.substring(0,7);
@@ -770,21 +819,31 @@
           if(!this.data[monthKey].locked) {
             item.id = this.generateId();
             this.data[monthKey].items.push(item);
+            added++;
+          } else {
+            skipped++;
           }
         });
         for(let key in this.data) {
           this.data[key].items.sort((a,b) => a.date.localeCompare(b.date));
         }
-        if(items.length > 0) this.activeMonth = items[0].date.substring(0,7);
+        if(added > 0) {
+          // focus the month of the first successfully added item
+          const firstAdded = items.find(it => it.date && !(this.data[it.date.substring(0,7)] || {}).locked);
+          if(firstAdded) this.activeMonth = firstAdded.date.substring(0,7);
+          this.markDirty();
+        }
         this.renderDashboard();
+        return { added, skipped };
       },
-      
+
       deleteItem(monthKey, id) {
         if(!this.data[monthKey] || this.data[monthKey].locked) return;
         this.data[monthKey].items = this.data[monthKey].items.filter(i => i.id !== id);
+        this.markDirty();
         this.renderDashboard();
       },
-      
+
       updateItem(monthKey, id, updatedData) {
         if(!this.data[monthKey] || this.data[monthKey].locked) return;
         const idx = this.data[monthKey].items.findIndex(i => i.id === id);
@@ -793,70 +852,65 @@
           const newMonth = updatedData.date.substring(0,7);
           if(newMonth !== monthKey) {
             const item = this.data[monthKey].items.splice(idx, 1)[0];
-            this.addItems([item]);
+            this.addItems([item]);   // addItems marks dirty + renders
           } else {
              this.data[monthKey].items.sort((a,b) => a.date.localeCompare(b.date));
+             this.markDirty();
              this.renderDashboard();
           }
         }
       },
-      
+
       updateMonthSettings(monthKey, opening, locked) {
         if(!this.data[monthKey]) this.data[monthKey] = {items:[]};
         this.data[monthKey].opening = Number(opening) || 0;
         this.data[monthKey].locked = !!locked;
+        this.markDirty();
         this.renderDashboard();
       },
 
       clearAll() {
         this.data = {};
         this.activeMonth = null;
+        this.markDirty();
         this.renderDashboard();
       },
 
       renderDashboard() {
-        renderTabs();
-        renderKPIs();
-        renderTableRows();
+        Render.renderTabs();
+        Render.renderKPIs();
+        Render.renderTableRows();
+        Render.renderBanner();
       }
     };
+    window.AppStore = AppStore;   // referenced by inline handlers / confirmDelete
 
     // ─────────────────────────────────────────────
-    // CLOUD STORE  (FIX v19: Worker-based Koofr proxy)
-    //
-    // The HTML page (GitHub Pages) cannot call Koofr WebDAV directly — Koofr
-    // does not emit CORS headers for browser requests.
-    //
-    // Solution: a Cloudflare Worker (cf-worker.js) acts as a CORS proxy.
-    //   GET  Worker URL  → reads  /ledger/ledger_data.json  from Koofr
-    //   PUT  Worker URL  → writes /ledger/ledger_data.json  to   Koofr
-    //
-    // Credentials (KOOFR_USER, KOOFR_PASS) are stored as Worker Secrets so they
-    // never appear in client-side code.  The browser can also pass them via
-    // X-Koofr-User / X-Koofr-Pass headers as a fallback during initial testing.
-    //
-    // 404 from the Worker means the Worker script is NOT deployed yet.
-    // Follow the setup steps in cf-worker.js and the ⚙️ Setup dialog.
+    // Module: CloudStore — Cloudflare-Worker-proxied Koofr sync
+    //   Password is kept in memory for the session only (never persisted).
     // ─────────────────────────────────────────────
     const CloudStore = {
       cfgKey: 'ledger_cloud_config',
+      _pass: '',   // session-only; cleared on reload
 
       getConfig() {
-        return JSON.parse(
-          localStorage.getItem(this.cfgKey) ||
-          '{"url":"","user":"","pass":""}'
-        );
+        let c;
+        try { c = JSON.parse(localStorage.getItem(this.cfgKey) || '{}'); }
+        catch(e) { c = {}; }
+        return { url: c.url || '', user: c.user || '' };
       },
 
+      // Persist only url + user. The password lives in memory for this session.
       saveConfig(url, user, pass) {
-        localStorage.setItem(this.cfgKey, JSON.stringify({ url, user, pass }));
+        localStorage.setItem(this.cfgKey, JSON.stringify({ url, user }));
+        this._pass = pass || '';
       },
 
       _buildHeaders(extra = {}) {
         const cfg = this.getConfig();
         const h = { 'Content-Type': 'application/json', ...extra };
         if (cfg.user && cfg.user.trim()) h['X-Koofr-User'] = cfg.user.trim();
-        if (cfg.pass && cfg.pass.trim()) h['X-Koofr-Pass'] = cfg.pass.trim();
+        if (this._pass && this._pass.trim()) h['X-Koofr-Pass'] = this._pass.trim();
         return h;
       },
 
@@ -876,6 +930,8 @@
           });
           if (res.ok) {
             setStatus("Ready.");
+            AppStore.markClean();          // saved → in sync, hide banner
+            AppStore.renderDashboard();
             showToast("Saved to Cloud successfully!");
           } else {
             const errText = await res.text().catch(() => res.statusText);
@@ -902,7 +958,7 @@
           });
           if (res.ok) {
             const data = await res.text();
-            AppStore.loadData(data);
+            AppStore.loadData(data);       // loadData marks clean + renders
             setStatus("Ready.");
           } else {
             const errText = await res.text().catch(() => res.statusText);
@@ -917,563 +973,643 @@
     };
 
     // ─────────────────────────────────────────────
-    // FILE HANDLING
+    // Module: Render — dashboard (tabs, KPIs, tables, banner)
+    //   Single source of truth for visible months:
+    //   month tab (activeMonth) > month dropdown > year dropdown > all
     // ─────────────────────────────────────────────
-    document.getElementById("btnPick").onclick = () => document.getElementById("filePick").click();
-    document.getElementById("filePick").onchange = (e) => {
-      const f = e.target.files[0];
-      if(f) handleFile(f);
-      e.target.value = "";
-    };
-    
-    const dz = document.getElementById("dropZone");
-    dz.ondragover = e => { e.preventDefault(); dz.classList.add("drag"); };
-    dz.ondragleave = e => { e.preventDefault(); dz.classList.remove("drag"); };
-    dz.ondrop = e => {
-      e.preventDefault(); dz.classList.remove("drag");
-      if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
-    };
-
-    async function handleFile(file) {
-      const ext = file.name.split('.').pop().toLowerCase();
-      try {
-        if(ext === 'pdf') {
-          document.getElementById('mapSection').style.display = 'none';
-          document.getElementById('pdfSection').style.display = 'grid';
-          const res = await pdfExtractText(file);
-          previewData = res.items.map(it => ({...it, selected: true}));
-          document.getElementById('pvType').value = "Bank Statement (PDF)";
-          document.getElementById('pvYear').value = res.year;
-          renderPreview();
-        } else if (['csv','xls','xlsx'].includes(ext)) {
-          document.getElementById('mapSection').style.display = 'block';
-          document.getElementById('pdfSection').style.display = 'none';
-          currentWb = await processExcelCsv(file);
-          
-          const shSel = document.getElementById('mapSheet');
-          shSel.innerHTML = "";
-          currentWb.SheetNames.forEach(n => {
-            const opt = document.createElement("option"); opt.value=n; opt.textContent=n;
-            shSel.appendChild(opt);
-          });
-          
-          shSel.onchange = () => populateCols(currentWb.Sheets[shSel.value]);
-          populateCols(currentWb.Sheets[currentWb.SheetNames[0]]);
-          
-          previewData = [];
-          renderPreview();
-        } else {
-          showToast("Unsupported file format.");
+    const Render = {
+      getFilteredMonthKeys() {
+        const allMonths = Object.keys(AppStore.data).sort().reverse();
+        if (AppStore.activeMonth) {
+          return allMonths.filter(m => m === AppStore.activeMonth);
         }
-      } catch(err) {
-        showToast("Error parsing file: " + err.message);
-        setStatus("Error.");
-      }
-    }
+        const mf = document.getElementById("monthNameFilter").value;
+        if (mf) {
+          return allMonths.filter(m => m === mf);
+        }
+        const yf = document.getElementById("yearFilter").value;
+        if (yf) {
+          return allMonths.filter(m => m.startsWith(yf));
+        }
+        return allMonths;
+      },
 
-    function populateCols(sheet) {
-      const json = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false});
-      if(!json.length) return;
-      const headers = json[0] || [];
-      const sels = ['mapDateCol', 'mapDetailsCol', 'mapAmountCol', 'mapDebitCol', 'mapCreditCol', 'mapRemarkCol'];
-      sels.forEach(id => {
-        const el = document.getElementById(id);
-        el.innerHTML = `<option value="-1">(none)</option>`;
-        headers.forEach((h,i) => {
-          const opt = document.createElement("option"); opt.value=i; opt.textContent=h||`Col ${i}`;
-          el.appendChild(opt);
+      getPeriodLabel() {
+        if (AppStore.activeMonth) return "Period: " + fmtMonthMMM(AppStore.activeMonth);
+        const mf = document.getElementById("monthNameFilter").value;
+        if (mf) return "Period: " + fmtMonthMMM(mf);
+        const yf = document.getElementById("yearFilter").value;
+        if (yf) return "Period: " + yf;
+        return "Period: All";
+      },
+
+      renderBanner() {
+        document.getElementById("syncBanner").style.display = AppStore.dirty ? "flex" : "none";
+      },
+
+      renderTabs() {
+        const tb = document.getElementById("monthTabs");
+        tb.innerHTML = "";
+        const months = Object.keys(AppStore.data).sort().reverse();
+
+        const yf = document.getElementById("yearFilter");
+        const mf = document.getElementById("monthNameFilter");
+        const prevYear  = yf.value;
+        const prevMonth = mf.value;
+        yf.innerHTML = '<option value="">All</option>';
+        mf.innerHTML = '<option value="">All</option>';
+        const years = new Set(months.map(m => m.substring(0,4)));
+        years.forEach(y => yf.innerHTML += `<option value="${y}">${y}</option>`);
+        months.forEach(m => mf.innerHTML += `<option value="${m}">${fmtMonthMMM(m)}</option>`);
+        if (prevYear  && yf.querySelector(`option[value="${prevYear}"]`))  yf.value = prevYear;
+        if (prevMonth && mf.querySelector(`option[value="${prevMonth}"]`)) mf.value = prevMonth;
+
+        if (!AppStore.activeMonth && months.length > 0 && !yf.value && !mf.value) {
+          AppStore.activeMonth = months[0];
+        }
+
+        months.forEach(m => {
+          const btn = document.createElement("button");
+          btn.className = "tabBtn " + (m === AppStore.activeMonth ? "active" : "");
+          btn.textContent = fmtMonthMMM(m);
+          btn.onclick = () => {
+            document.getElementById("yearFilter").value = "";
+            document.getElementById("monthNameFilter").value = "";
+            AppStore.activeMonth = m;
+            AppStore.renderDashboard();
+          };
+          tb.appendChild(btn);
         });
-      });
-      document.getElementById('maskImport').style.display = 'flex';
-      setStatus("Awaiting Smart Map mapping.");
-    }
 
-    document.getElementById('btnRebuildPreview').onclick = () => {
-       if(!currentWb) return;
-       const shName = document.getElementById('mapSheet').value;
-       const sheet = currentWb.Sheets[shName];
-       const json = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false});
-       if(json.length < 2) return;
-       
-       const dateOrder = document.getElementById('mapDateOrder').value;
-       const cDate = parseInt(document.getElementById('mapDateCol').value);
-       const cDet = parseInt(document.getElementById('mapDetailsCol').value);
-       const cAmt = parseInt(document.getElementById('mapAmountCol').value);
-       const cDeb = parseInt(document.getElementById('mapDebitCol').value);
-       const cCred = parseInt(document.getElementById('mapCreditCol').value);
-       const cRem = parseInt(document.getElementById('mapRemarkCol').value);
+        if (AppStore.activeMonth && AppStore.data[AppStore.activeMonth]) {
+          document.getElementById("selMonth").value = fmtMonthMMM(AppStore.activeMonth);
+          document.getElementById("openingInput").value = AppStore.data[AppStore.activeMonth].opening || '';
+          document.getElementById("lockSelect").value = AppStore.data[AppStore.activeMonth].locked ? "1" : "0";
+        }
 
-       previewData = [];
-       for(let i=1; i<json.length; i++) {
-         const row = json[i];
-         if(!row) continue;
-         let amt = 0;
-         if(cAmt > -1) {
-            amt = parseAmountRaw(row[cAmt]);
-         } else {
-            let deb = cDeb > -1 ? parseAmountRaw(row[cDeb]) : 0;
-            let cred = cCred > -1 ? parseAmountRaw(row[cCred]) : 0;
-            amt = deb > 0 ? deb : -Math.abs(cred);
+        document.getElementById("periodPill").textContent = this.getPeriodLabel();
+      },
+
+      renderKPIs() {
+        const keys = this.getFilteredMonthKeys();
+        let count=0, debit=0, credit=0;
+        for (const m of keys) {
+          const d = AppStore.data[m];
+          if (!d) continue;
+          const res = computeDebitCredit(d.items);
+          count += res.count; debit += res.debit; credit += res.credit;
+        }
+        document.getElementById('kpiCount').textContent = count;
+        document.getElementById('kpiDebit').textContent = fmt(debit);
+        document.getElementById('kpiCredit').textContent = fmt(credit);
+        const net = debit - credit;
+        const netEl = document.getElementById('kpiNet');
+        netEl.textContent = fmt(net);
+        netEl.className = "kpiValue " + (net >= 0 ? "kpiGood" : "kpiBad");
+      },
+
+      renderTableRows() {
+        const container = document.getElementById("months");
+        container.innerHTML = "";
+
+        const monthKeys = this.getFilteredMonthKeys();
+        monthKeys.forEach(mKey => {
+           const mData = AppStore.data[mKey];
+           if(!mData || mData.items.length === 0) return;
+
+           const div = document.createElement("div");
+           div.className = "monthCard";
+
+           const isLocked = mData.locked;
+           const lockIcon = isLocked ? "🔒 " : "";
+
+           let html = `
+             <div class="monthHd">
+               <div><b>${lockIcon}${fmtMonthMMM(mKey)}</b> <span class="muted" style="margin-left:10px">Opening: ${fmt(mData.opening)}</span></div>
+             </div>
+             <div style="overflow-x:auto;">
+               <table>
+                 <thead>
+                   <tr>
+                     <th style="width:100px">Date</th>
+                     <th>Details</th>
+                     <th style="width:120px">Amount</th>
+                     <th>Remark</th>
+                     <th style="width:100px" class="right">Actions</th>
+                   </tr>
+                 </thead>
+                 <tbody>
+           `;
+
+           let runBal = mData.opening || 0;
+           mData.items.forEach(it => {
+              runBal += it.amount;
+              html += `
+                <tr>
+                  <td>${fmtDateDDMMMYYYY(it.date)}</td>
+                  <td>${escapeHtml(it.details)}</td>
+                  <td style="color:${it.amount>=0?'var(--good)':'var(--bad)'}">${fmt(it.amount)}</td>
+                  <td class="muted">${escapeHtml(it.remark)}</td>
+                  <td class="right actions">
+                    <button class="ghost" onclick="openEdit('${mKey}','${it.id}')" ${isLocked?'disabled':''}>✎</button>
+                    <button class="ghost danger" onclick="confirmDelete('${mKey}','${it.id}')" ${isLocked?'disabled':''}>✕</button>
+                  </td>
+                </tr>
+              `;
+           });
+
+           html += `
+                 </tbody>
+               </table>
+             </div>
+             <div style="padding:12px; background:rgba(0,0,0,0.2); text-align:right; font-size:13px;">
+               <b>Closing Balance: ${fmt(runBal)}</b>
+             </div>
+           `;
+           div.innerHTML = html;
+           container.appendChild(div);
+        });
+      }
+    };
+
+    // ─────────────────────────────────────────────
+    // Module: ImportUI — file drop/pick, smart mapping, preview & import
+    //   `previewData` is a top-level let so inline preview-row handlers can
+    //   reach it; ImportUI reassigns it via closure.
+    // ─────────────────────────────────────────────
+    let previewData = [];
+    let currentWb = null;
+
+    const ImportUI = {
+      async handleFile(file) {
+        const ext = file.name.split('.').pop().toLowerCase();
+        try {
+          if(ext === 'pdf') {
+            document.getElementById('mapSection').style.display = 'none';
+            document.getElementById('pdfSection').style.display = 'grid';
+            const res = await Parser.pdfExtractText(file);
+            previewData = res.items.map(it => ({...it, selected: true}));
+            document.getElementById('pvType').value = "Bank Statement (PDF)";
+            document.getElementById('pvYear').value = res.year;
+            this.renderPreview();
+          } else if (['csv','xls','xlsx'].includes(ext)) {
+            document.getElementById('mapSection').style.display = 'block';
+            document.getElementById('pdfSection').style.display = 'none';
+            currentWb = await Parser.processExcelCsv(file);
+
+            const shSel = document.getElementById('mapSheet');
+            shSel.innerHTML = "";
+            currentWb.SheetNames.forEach(n => {
+              const opt = document.createElement("option"); opt.value=n; opt.textContent=n;
+              shSel.appendChild(opt);
+            });
+
+            shSel.onchange = () => this.populateCols(currentWb.Sheets[shSel.value]);
+            this.populateCols(currentWb.Sheets[currentWb.SheetNames[0]]);
+
+            previewData = [];
+            this.renderPreview();
+          } else {
+            showToast("Unsupported file format.");
+          }
+        } catch(err) {
+          showToast("Error parsing file: " + err.message);
+          setStatus("Error.");
+        }
+      },
+
+      populateCols(sheet) {
+        const json = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false});
+        if(!json.length) return;
+        const headers = json[0] || [];
+        const sels = ['mapDateCol', 'mapDetailsCol', 'mapAmountCol', 'mapDebitCol', 'mapCreditCol', 'mapRemarkCol'];
+        sels.forEach(id => {
+          const el = document.getElementById(id);
+          el.innerHTML = `<option value="-1">(none)</option>`;
+          headers.forEach((h,i) => {
+            const opt = document.createElement("option"); opt.value=i; opt.textContent=h||`Col ${i}`;
+            el.appendChild(opt);
+          });
+        });
+        document.getElementById('maskImport').style.display = 'flex';
+        setStatus("Awaiting Smart Map mapping.");
+      },
+
+      rebuildPreview() {
+         if(!currentWb) return;
+         const shName = document.getElementById('mapSheet').value;
+         const sheet = currentWb.Sheets[shName];
+         const json = XLSX.utils.sheet_to_json(sheet, {header:1, raw:false});
+         if(json.length < 2) return;
+
+         const dateOrder = document.getElementById('mapDateOrder').value;
+         const cDate = parseInt(document.getElementById('mapDateCol').value);
+         const cDet = parseInt(document.getElementById('mapDetailsCol').value);
+         const cAmt = parseInt(document.getElementById('mapAmountCol').value);
+         const cDeb = parseInt(document.getElementById('mapDebitCol').value);
+         const cCred = parseInt(document.getElementById('mapCreditCol').value);
+         const cRem = parseInt(document.getElementById('mapRemarkCol').value);
+
+         previewData = [];
+         for(let i=1; i<json.length; i++) {
+           const row = json[i];
+           if(!row) continue;
+           let amt = 0;
+           if(cAmt > -1) {
+              amt = parseAmountRaw(row[cAmt]);
+           } else {
+              let deb = cDeb > -1 ? parseAmountRaw(row[cDeb]) : 0;
+              let cred = cCred > -1 ? parseAmountRaw(row[cCred]) : 0;
+              amt = deb > 0 ? deb : -Math.abs(cred);
+           }
+           const rawDate = cDate > -1 ? row[cDate] : "";
+           if(!rawDate) continue;
+           previewData.push({
+             date: normalizeToISODate(rawDate, dateOrder),
+             details: cDet > -1 ? (row[cDet]||"") : "",
+             amount: amt,
+             remark: cRem > -1 ? (row[cRem]||"") : "",
+             selected: true
+           });
          }
-         const rawDate = cDate > -1 ? row[cDate] : "";
-         if(!rawDate) continue;
-         previewData.push({
-           date: normalizeToISODate(rawDate, dateOrder),
-           details: cDet > -1 ? (row[cDet]||"") : "",
-           amount: amt,
-           remark: cRem > -1 ? (row[cRem]||"") : "",
-           selected: true
-         });
-       }
-       renderPreview();
-    };
+         this.renderPreview();
+      },
 
-    function renderPreview() {
-      const tb = document.getElementById("pvTableBody");
-      tb.innerHTML = "";
-      previewData.forEach((it, idx) => {
-         const tr = document.createElement("tr");
-         tr.innerHTML = `
-           <td><input type="checkbox" ${it.selected ? "checked" : ""} onchange="previewData[${idx}].selected = this.checked"></td>
-           <td><input class="mini" value="${escapeHtml(it.date)}" onchange="previewData[${idx}].date = this.value"></td>
-           <td><input class="mini" value="${escapeHtml(it.details)}" onchange="previewData[${idx}].details = this.value" style="width:100%"></td>
-           <td><input class="mini" value="${it.amount}" onchange="previewData[${idx}].amount = parseAmountRaw(this.value)"></td>
-           <td><input class="mini" value="${escapeHtml(it.remark)}" onchange="previewData[${idx}].remark = this.value" style="width:100%"></td>
-         `;
-         tb.appendChild(tr);
-      });
-      document.getElementById('pvStatus').textContent = `${previewData.length} found`;
-      document.getElementById('maskImport').style.display = 'flex';
-      setStatus("Previewing Import Data.");
-    }
+      renderPreview() {
+        const tb = document.getElementById("pvTableBody");
+        tb.innerHTML = "";
+        previewData.forEach((it, idx) => {
+           const tr = document.createElement("tr");
+           tr.innerHTML = `
+             <td><input type="checkbox" ${it.selected ? "checked" : ""} onchange="previewData[${idx}].selected = this.checked"></td>
+             <td><input class="mini" value="${escapeHtml(it.date)}" onchange="previewData[${idx}].date = this.value"></td>
+             <td><input class="mini" value="${escapeHtml(it.details)}" onchange="previewData[${idx}].details = this.value" style="width:100%"></td>
+             <td><input class="mini" value="${it.amount}" onchange="previewData[${idx}].amount = parseAmountRaw(this.value)"></td>
+             <td><input class="mini" value="${escapeHtml(it.remark)}" onchange="previewData[${idx}].remark = this.value" style="width:100%"></td>
+           `;
+           tb.appendChild(tr);
+        });
+        document.getElementById('pvStatus').textContent = `${previewData.length} found`;
+        document.getElementById('maskImport').style.display = 'flex';
+        setStatus("Previewing Import Data.");
+      },
 
-    document.getElementById('btnSelectAll').onclick = () => { previewData.forEach(i=>i.selected=true); renderPreview(); };
-    document.getElementById('btnSelectNone').onclick = () => { previewData.forEach(i=>i.selected=false); renderPreview(); };
-    document.getElementById('btnImportClose').onclick = () => document.getElementById('maskImport').style.display = 'none';
-    document.getElementById('btnCancelImport').onclick = () => document.getElementById('maskImport').style.display = 'none';
-
-    document.getElementById('btnDoImport').onclick = () => {
-      const selected = previewData.filter(i => i.selected);
-      if(selected.length === 0) return showToast("Nothing selected.");
-      AppStore.addItems(selected);
-      document.getElementById('maskImport').style.display = 'none';
-      showToast(`Imported ${selected.length} records.`);
-      setStatus("Ready.");
+      doImport() {
+        const selected = previewData.filter(i => i.selected);
+        if(selected.length === 0) return showToast("Nothing selected.");
+        const { added, skipped } = AppStore.addItems(selected);
+        document.getElementById('maskImport').style.display = 'none';
+        showToast(`Imported ${added} record(s).`);
+        if(skipped > 0) showToast(`Skipped ${skipped} record(s) — target month is locked.`);
+        setStatus("Ready.");
+      }
     };
 
     // ─────────────────────────────────────────────
-    // RENDER
+    // Module: EntryUI — month settings, manual entry, Add/Edit modals, calendar
     // ─────────────────────────────────────────────
+    const EntryUI = {
+      editingItem: null,
+      calView: new Date(),
 
-    // Single source of truth: which month keys are currently visible.
-    // Priority: month tab (activeMonth) > month dropdown > year dropdown > all
-    function getFilteredMonthKeys() {
-      const allMonths = Object.keys(AppStore.data).sort().reverse();
-      if (AppStore.activeMonth) {
-        // A specific tab is selected — show only that month
-        return allMonths.filter(m => m === AppStore.activeMonth);
+      applyMonth() {
+        if(!AppStore.activeMonth) return showToast("Select a month tab first.");
+        const op = document.getElementById("openingInput").value;
+        const lk = document.getElementById("lockSelect").value === "1";
+        AppStore.updateMonthSettings(AppStore.activeMonth, op, lk);
+        showToast("Month settings applied.");
+      },
+
+      manualSave() {
+        const d = document.getElementById("mDateISO").value;
+        const det = document.getElementById("mDetails").value;
+        const amt = parseAmountRaw(document.getElementById("mAmount").value);
+        const rm = document.getElementById("mRemark").value;
+        if(!d || !det || amt === 0) return showToast("Please fill Date, Details, and a valid Amount.");
+        const { added, skipped } = AppStore.addItems([{date:d, details:det, amount:amt, remark:rm}]);
+        if(added > 0) {
+          document.getElementById("mDetails").value = "";
+          document.getElementById("mAmount").value = "";
+          document.getElementById("mRemark").value = "";
+          showToast("Manual entry added.");
+        }
+        if(skipped > 0) showToast("Not added — that month is locked.");
+      },
+
+      // ── Add Record modal (wires the previously-dead #btnAdd) ──────────────
+      openAdd() {
+        document.getElementById("addDate").value = new Date().toISOString().slice(0,10);
+        document.getElementById("addAmount").value = "";
+        document.getElementById("addDetails").value = "";
+        document.getElementById("addRemark").value = "";
+        document.getElementById("maskAdd").style.display = "flex";
+        setTimeout(() => document.getElementById("addDetails").focus(), 0);
+      },
+
+      addSave() {
+        const d = document.getElementById("addDate").value;
+        const det = document.getElementById("addDetails").value;
+        const amt = parseAmountRaw(document.getElementById("addAmount").value);
+        const rm = document.getElementById("addRemark").value;
+        if(!d || !det || amt === 0) return showToast("Please fill Date, Details, and a valid Amount.");
+        const { added, skipped } = AppStore.addItems([{date:d, details:det, amount:amt, remark:rm}]);
+        if(added > 0) {
+          document.getElementById("maskAdd").style.display = "none";
+          showToast("Record added.");
+        }
+        if(skipped > 0) showToast("Not added — that month is locked.");
+      },
+
+      // ── Edit modal ────────────────────────────────────────────────────────
+      openEdit(mKey, id) {
+        const item = AppStore.data[mKey].items.find(i=>i.id===id);
+        if(!item) return;
+        this.editingItem = {mKey, id};
+        document.getElementById('editDate').value = item.date;
+        document.getElementById('editAmount').value = item.amount;
+        document.getElementById('editDetails').value = item.details;
+        document.getElementById('editRemark').value = item.remark;
+        document.getElementById('maskEdit').style.display = 'flex';
+      },
+
+      editSave() {
+        if(!this.editingItem) return;
+        const updated = {
+          date: document.getElementById('editDate').value,
+          amount: parseAmountRaw(document.getElementById('editAmount').value),
+          details: document.getElementById('editDetails').value,
+          remark: document.getElementById('editRemark').value
+        };
+        AppStore.updateItem(this.editingItem.mKey, this.editingItem.id, updated);
+        document.getElementById('maskEdit').style.display = 'none';
+        showToast("Entry updated.");
+      },
+
+      // ── Calendar ──────────────────────────────────────────────────────────
+      toggleCalendar() {
+        const calPop = document.getElementById("calPop");
+        calPop.style.display = calPop.style.display==="block" ? "none" : "block";
+        this.renderCalendar();
+      },
+
+      renderCalendar() {
+        const y = this.calView.getFullYear();
+        const m = this.calView.getMonth();
+        document.getElementById("calTitle").textContent = `${MMM[m]} ${y}`;
+        const grid = document.getElementById("calGrid");
+        grid.innerHTML = '<div class="calDow">Su</div><div class="calDow">Mo</div><div class="calDow">Tu</div><div class="calDow">We</div><div class="calDow">Th</div><div class="calDow">Fr</div><div class="calDow">Sa</div>';
+        const firstDay = new Date(y,m,1).getDay();
+        const daysInMonth = new Date(y,m+1,0).getDate();
+        for(let i=0; i<firstDay; i++) grid.innerHTML += `<div class="calDay mutedDay"></div>`;
+        for(let d=1; d<=daysInMonth; d++) {
+           const div = document.createElement("div");
+           div.className = "calDay";
+           div.textContent = d;
+           div.onclick = () => {
+              const iso = `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+              document.getElementById("mDateISO").value = iso;
+              document.getElementById("mDateDisplay").value = fmtDateDDMMMYYYY(iso);
+              document.getElementById("calPop").style.display = "none";
+           };
+           grid.appendChild(div);
+        }
+      },
+
+      calShift(delta) {
+        this.calView.setMonth(this.calView.getMonth()+delta);
+        this.renderCalendar();
       }
-      const mf = document.getElementById("monthNameFilter").value;
-      if (mf) {
-        // Month dropdown is set — show only that month
-        return allMonths.filter(m => m === mf);
+    };
+    // Exposed for the inline edit button in generated table rows
+    window.openEdit = (mKey, id) => EntryUI.openEdit(mKey, id);
+
+    // ─────────────────────────────────────────────
+    // Module: ExportUI — Excel (.xlsx) + PDF export (respect active filter)
+    // ─────────────────────────────────────────────
+    const ExportUI = {
+      exportXlsx() {
+        const filteredKeys = Render.getFilteredMonthKeys();
+        if(filteredKeys.length === 0) return showToast("No data to export.");
+        const wb = XLSX.utils.book_new();
+        for(const m of filteredKeys) {
+           const mData = AppStore.data[m];
+           if(!mData) continue;
+           const opening = mData.opening || 0;
+
+           const exportData = [{
+              Date: "Opening", Details: "Opening Balance",
+              Debit: '', Credit: '', Balance: opening, Remark: ""
+           }];
+
+           let runBal = opening;
+           for(const it of mData.items) {
+              runBal += it.amount;
+              exportData.push({
+                 Date:    fmtDateDDMMMYYYY(it.date),
+                 Details: it.details,
+                 Debit:   it.amount > 0 ? it.amount : '',
+                 Credit:  it.amount < 0 ? Math.abs(it.amount) : '',
+                 Balance: runBal,
+                 Remark:  it.remark
+              });
+           }
+
+           exportData.push({
+              Date: "Closing", Details: "Closing Balance",
+              Debit: '', Credit: '', Balance: runBal, Remark: ""
+           });
+
+           const ws = XLSX.utils.json_to_sheet(exportData);
+           XLSX.utils.book_append_sheet(wb, ws, fmtMonthMMM(m));
+        }
+        const periodLabel = Render.getPeriodLabel().replace("Period: ", "").replace(/[^A-Za-z0-9._-]/g, "_");
+        XLSX.writeFile(wb, `Ledger_${periodLabel}.xlsx`);
+        showToast("Exported to Excel.");
+      },
+
+      exportPdf() {
+        const filteredKeys = Render.getFilteredMonthKeys();
+        if(filteredKeys.length === 0) return showToast("No data to export.");
+        if(!window.jspdf) return showToast("PDF library still loading, please wait.");
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+        doc.setFontSize(16);
+        doc.text("Ledger Export", 14, 20);
+        doc.setFontSize(10);
+        doc.setTextColor(100);
+        let finalY = 30;
+        for(const m of filteredKeys) {
+           const mData = AppStore.data[m];
+           if(!mData) continue;
+           const opening = mData.opening || 0;
+
+           let runBal = opening;
+           const tableBody = [];
+           for(const it of mData.items) {
+              runBal += it.amount;
+              tableBody.push([
+                 fmtDateDDMMMYYYY(it.date),
+                 it.details,
+                 it.amount > 0 ? fmt(it.amount) : '',
+                 it.amount < 0 ? fmt(Math.abs(it.amount)) : '',
+                 fmt(runBal)
+              ]);
+           }
+
+           tableBody.push([
+              'Closing', 'Closing Balance', '', '', fmt(runBal)
+           ]);
+
+           doc.text(`${fmtMonthMMM(m)} — Opening: ${fmt(opening)}`, 14, finalY);
+           doc.autoTable({
+             startY: finalY + 5,
+             head: [['Date', 'Details', 'Debit (+)', 'Credit (−)', 'Balance']],
+             body: tableBody,
+             theme: 'grid',
+             headStyles: { fillColor: [124, 92, 255] },
+             didParseCell: (data) => {
+               if(data.row.index === tableBody.length - 1) {
+                 data.cell.styles.fontStyle = 'bold';
+               }
+             },
+             margin: { left: 14 }
+           });
+           finalY = doc.lastAutoTable.finalY + 15;
+           if(finalY > 260) { doc.addPage(); finalY = 20; }
+        }
+        const periodLabel = Render.getPeriodLabel().replace("Period: ", "").replace(/[^A-Za-z0-9._-]/g, "_");
+        doc.save(`Ledger_${periodLabel}.pdf`);
+        showToast("Exported to PDF.");
       }
-      const yf = document.getElementById("yearFilter").value;
-      if (yf) {
-        // Year dropdown is set — show all months of that year
-        return allMonths.filter(m => m.startsWith(yf));
+    };
+
+    // ─────────────────────────────────────────────
+    // Module: App — event wiring, destructive-action confirms, keyboard, boot
+    // ─────────────────────────────────────────────
+    // Row delete with confirmation (referenced by inline onclick in table rows)
+    window.confirmDelete = (mKey, id) => {
+      if(confirm("Delete this record? This cannot be undone.")) {
+        AppStore.deleteItem(mKey, id);
+        showToast("Record deleted.");
       }
-      // Nothing selected — show everything
-      return allMonths;
-    }
+    };
 
-    // Build a label for the Period pill from current filter state
-    function getPeriodLabel() {
-      if (AppStore.activeMonth) return "Period: " + fmtMonthMMM(AppStore.activeMonth);
-      const mf = document.getElementById("monthNameFilter").value;
-      if (mf) return "Period: " + fmtMonthMMM(mf);
-      const yf = document.getElementById("yearFilter").value;
-      if (yf) return "Period: " + yf;
-      return "Period: All";
-    }
+    const App = {
+      $(id){ return document.getElementById(id); },
 
-    function renderTabs() {
-      const tb = document.getElementById("monthTabs");
-      tb.innerHTML = "";
-      const months = Object.keys(AppStore.data).sort().reverse();
+      wire() {
+        // Add Record
+        this.$("btnAdd").onclick       = () => EntryUI.openAdd();
+        this.$("btnAddSave").onclick   = () => EntryUI.addSave();
+        this.$("btnAddCancel").onclick = () => this.$("maskAdd").style.display = "none";
 
-      // Rebuild year and month dropdowns (preserve current selections)
-      const yf = document.getElementById("yearFilter");
-      const mf = document.getElementById("monthNameFilter");
-      const prevYear  = yf.value;
-      const prevMonth = mf.value;
-      yf.innerHTML = '<option value="">All</option>';
-      mf.innerHTML = '<option value="">All</option>';
-      const years = new Set(months.map(m => m.substring(0,4)));
-      years.forEach(y => yf.innerHTML += `<option value="${y}">${y}</option>`);
-      months.forEach(m => mf.innerHTML += `<option value="${m}">${fmtMonthMMM(m)}</option>`);
-      // Restore previous selections if they still exist
-      if (prevYear  && yf.querySelector(`option[value="${prevYear}"]`))  yf.value = prevYear;
-      if (prevMonth && mf.querySelector(`option[value="${prevMonth}"]`)) mf.value = prevMonth;
+        // File handling
+        this.$("btnPick").onclick = () => this.$("filePick").click();
+        this.$("filePick").onchange = (e) => {
+          const f = e.target.files[0];
+          if(f) ImportUI.handleFile(f);
+          e.target.value = "";
+        };
+        const dz = this.$("dropZone");
+        dz.ondragover  = e => { e.preventDefault(); dz.classList.add("drag"); };
+        dz.ondragleave = e => { e.preventDefault(); dz.classList.remove("drag"); };
+        dz.ondrop = e => {
+          e.preventDefault(); dz.classList.remove("drag");
+          if(e.dataTransfer.files[0]) ImportUI.handleFile(e.dataTransfer.files[0]);
+        };
 
-      if (!AppStore.activeMonth && months.length > 0 && !yf.value && !mf.value) {
-        AppStore.activeMonth = months[0];
-      }
+        // Import modal
+        this.$("btnRebuildPreview").onclick = () => ImportUI.rebuildPreview();
+        this.$("btnSelectAll").onclick = () => { previewData.forEach(i=>i.selected=true); ImportUI.renderPreview(); };
+        this.$("btnSelectNone").onclick = () => { previewData.forEach(i=>i.selected=false); ImportUI.renderPreview(); };
+        this.$("btnImportClose").onclick = () => this.$("maskImport").style.display = 'none';
+        this.$("btnCancelImport").onclick = () => this.$("maskImport").style.display = 'none';
+        this.$("btnDoImport").onclick = () => ImportUI.doImport();
 
-      months.forEach(m => {
-        const btn = document.createElement("button");
-        btn.className = "tabBtn " + (m === AppStore.activeMonth ? "active" : "");
-        btn.textContent = fmtMonthMMM(m);
-        btn.onclick = () => {
-          // Clear dropdown filters so tab takes priority
-          document.getElementById("yearFilter").value = "";
-          document.getElementById("monthNameFilter").value = "";
-          AppStore.activeMonth = m;
+        // Month settings + manual entry
+        this.$("btnApplyMonth").onclick = () => EntryUI.applyMonth();
+        this.$("btnManualSave").onclick = () => EntryUI.manualSave();
+
+        // Edit modal
+        this.$("btnEditCancel").onclick = () => this.$("maskEdit").style.display = 'none';
+        this.$("btnEditSave").onclick = () => EntryUI.editSave();
+
+        // Calendar
+        this.$("calOpenBtn").onclick = () => EntryUI.toggleCalendar();
+        this.$("calPrev").onclick = () => EntryUI.calShift(-1);
+        this.$("calNext").onclick = () => EntryUI.calShift(1);
+
+        // Cloud settings
+        this.$("btnCloudSettings").onclick = () => {
+          const cfg = CloudStore.getConfig();
+          this.$("cloudUrl").value = cfg.url;
+          this.$("cloudUser").value = cfg.user;
+          this.$("cloudPass").value = CloudStore._pass;   // session value, if any
+          this.$("maskCloud").style.display = "flex";
+        };
+        this.$("btnCloudCancel").onclick = () => this.$("maskCloud").style.display = "none";
+        this.$("btnCloudSave").onclick = () => {
+          CloudStore.saveConfig(
+            this.$("cloudUrl").value,
+            this.$("cloudUser").value,
+            this.$("cloudPass").value
+          );
+          this.$("maskCloud").style.display = "none";
+          showToast("Cloud configuration saved.");
+        };
+        this.$("btnLoadCloud").onclick = () => CloudStore.loadFromCloud();
+        this.$("btnSaveCloud").onclick = () => CloudStore.saveToCloud();
+        this.$("btnBannerSave").onclick = () => CloudStore.saveToCloud();
+
+        // Clear (with confirmation)
+        this.$("btnClear").onclick = () => {
+          if(Object.keys(AppStore.data).length === 0) return showToast("Nothing to clear.");
+          if(confirm("Clear the entire ledger? This wipes all months and cannot be undone.")) {
+            AppStore.clearAll();
+            showToast("Ledger cleared.");
+          }
+        };
+
+        // Export
+        this.$("btnExportXlsx").onclick = () => ExportUI.exportXlsx();
+        this.$("btnExportPdf").onclick = () => ExportUI.exportPdf();
+
+        // Filter dropdowns
+        this.$("yearFilter").onchange = () => {
+          this.$("monthNameFilter").value = "";
+          AppStore.activeMonth = null;
           AppStore.renderDashboard();
         };
-        tb.appendChild(btn);
-      });
+        this.$("monthNameFilter").onchange = () => {
+          this.$("yearFilter").value = "";
+          AppStore.activeMonth = null;
+          AppStore.renderDashboard();
+        };
 
-      // Update the Month Settings panel to reflect activeMonth
-      if (AppStore.activeMonth && AppStore.data[AppStore.activeMonth]) {
-        document.getElementById("selMonth").value = fmtMonthMMM(AppStore.activeMonth);
-        document.getElementById("openingInput").value = AppStore.data[AppStore.activeMonth].opening || '';
-        document.getElementById("lockSelect").value = AppStore.data[AppStore.activeMonth].locked ? "1" : "0";
+        // Keyboard: Escape closes modals; Enter saves the open modal
+        document.addEventListener("keydown", (e) => {
+          if(e.key === "Escape") {
+            ["maskAdd","maskEdit","maskCloud","maskImport"].forEach(id => this.$(id).style.display = "none");
+            this.$("calPop").style.display = "none";
+            return;
+          }
+          if(e.key === "Enter") {
+            const tag = (e.target.tagName || "").toLowerCase();
+            if(tag === "textarea") return;
+            if(this.$("maskAdd").style.display === "flex")  { e.preventDefault(); EntryUI.addSave(); }
+            else if(this.$("maskEdit").style.display === "flex")  { e.preventDefault(); EntryUI.editSave(); }
+            else if(this.$("maskCloud").style.display === "flex") { e.preventDefault(); this.$("btnCloudSave").click(); }
+          }
+        });
+      },
+
+      boot() {
+        this.wire();
+        AppStore.init();
       }
-
-      // Update Period pill
-      document.getElementById("periodPill").textContent = getPeriodLabel();
-    }
-
-    function renderKPIs() {
-      // Only sum over the currently visible months
-      const keys = getFilteredMonthKeys();
-      let count=0, debit=0, credit=0;
-      for (const m of keys) {
-        const d = AppStore.data[m];
-        if (!d) continue;
-        const res = computeDebitCredit(d.items);
-        count += res.count; debit += res.debit; credit += res.credit;
-      }
-      document.getElementById('kpiCount').textContent = count;
-      document.getElementById('kpiDebit').textContent = fmt(debit);
-      document.getElementById('kpiCredit').textContent = fmt(credit);
-      const net = debit - credit;
-      const netEl = document.getElementById('kpiNet');
-      netEl.textContent = fmt(net);
-      netEl.className = "kpiValue " + (net >= 0 ? "kpiGood" : "kpiBad");
-    }
-
-    function renderTableRows() {
-      const container = document.getElementById("months");
-      container.innerHTML = "";
-
-      // Only render the currently visible months
-      const monthKeys = getFilteredMonthKeys();
-      monthKeys.forEach(mKey => {
-         const mData = AppStore.data[mKey];
-         if(!mData || mData.items.length === 0) return;
-
-         const div = document.createElement("div");
-         div.className = "monthCard";
-
-         const isLocked = mData.locked;
-         const lockIcon = isLocked ? "🔒 " : "";
-
-         let html = `
-           <div class="monthHd">
-             <div><b>${lockIcon}${fmtMonthMMM(mKey)}</b> <span class="muted" style="margin-left:10px">Opening: ${fmt(mData.opening)}</span></div>
-           </div>
-           <div style="overflow-x:auto;">
-             <table>
-               <thead>
-                 <tr>
-                   <th style="width:100px">Date</th>
-                   <th>Details</th>
-                   <th style="width:120px">Amount</th>
-                   <th>Remark</th>
-                   <th style="width:100px" class="right">Actions</th>
-                 </tr>
-               </thead>
-               <tbody>
-         `;
-
-         let runBal = mData.opening || 0;
-         mData.items.forEach(it => {
-            runBal += it.amount;
-            html += `
-              <tr>
-                <td>${fmtDateDDMMMYYYY(it.date)}</td>
-                <td>${escapeHtml(it.details)}</td>
-                <td style="color:${it.amount>=0?'var(--good)':'var(--bad)'}">${fmt(it.amount)}</td>
-                <td class="muted">${escapeHtml(it.remark)}</td>
-                <td class="right actions">
-                  <button class="ghost" onclick="openEdit('${mKey}','${it.id}')" ${isLocked?'disabled':''}>✎</button>
-                  <button class="ghost danger" onclick="AppStore.deleteItem('${mKey}','${it.id}')" ${isLocked?'disabled':''}>✕</button>
-                </td>
-              </tr>
-            `;
-         });
-
-         html += `
-               </tbody>
-             </table>
-           </div>
-           <div style="padding:12px; background:rgba(0,0,0,0.2); text-align:right; font-size:13px;">
-             <b>Closing Balance: ${fmt(runBal)}</b>
-           </div>
-         `;
-         div.innerHTML = html;
-         container.appendChild(div);
-      });
-    }
-
-    // ─────────────────────────────────────────────
-    // MONTH SETTINGS
-    // ─────────────────────────────────────────────
-    document.getElementById("btnApplyMonth").onclick = () => {
-      if(!AppStore.activeMonth) return showToast("Select a month tab first.");
-      const op = document.getElementById("openingInput").value;
-      const lk = document.getElementById("lockSelect").value === "1";
-      AppStore.updateMonthSettings(AppStore.activeMonth, op, lk);
-      showToast("Month settings applied.");
     };
 
-    document.getElementById("btnManualSave").onclick = () => {
-       const d = document.getElementById("mDateISO").value;
-       const det = document.getElementById("mDetails").value;
-       const amt = parseAmountRaw(document.getElementById("mAmount").value);
-       const rm = document.getElementById("mRemark").value;
-       if(!d || !det || amt === 0) return showToast("Please fill Date, Details, and a valid Amount.");
-       AppStore.addItems([{date:d, details:det, amount:amt, remark:rm}]);
-       document.getElementById("mDetails").value = "";
-       document.getElementById("mAmount").value = "";
-       document.getElementById("mRemark").value = "";
-       showToast("Manual entry added.");
-    };
-
-    // ─────────────────────────────────────────────
-    // EDIT MODAL
-    // ─────────────────────────────────────────────
-    let editingItem = null;
-    window.openEdit = (mKey, id) => {
-      const item = AppStore.data[mKey].items.find(i=>i.id===id);
-      if(!item) return;
-      editingItem = {mKey, id};
-      document.getElementById('editDate').value = item.date;
-      document.getElementById('editAmount').value = item.amount;
-      document.getElementById('editDetails').value = item.details;
-      document.getElementById('editRemark').value = item.remark;
-      document.getElementById('maskEdit').style.display = 'flex';
-    };
-
-    document.getElementById('btnEditCancel').onclick = () => document.getElementById('maskEdit').style.display = 'none';
-    document.getElementById('btnEditSave').onclick = () => {
-       if(!editingItem) return;
-       const updated = {
-         date: document.getElementById('editDate').value,
-         amount: parseAmountRaw(document.getElementById('editAmount').value),
-         details: document.getElementById('editDetails').value,
-         remark: document.getElementById('editRemark').value
-       };
-       AppStore.updateItem(editingItem.mKey, editingItem.id, updated);
-       document.getElementById('maskEdit').style.display = 'none';
-       showToast("Entry updated.");
-    };
-
-    // ─────────────────────────────────────────────
-    // CALENDAR
-    // ─────────────────────────────────────────────
-    const calPop = document.getElementById("calPop");
-    let calView = new Date();
-    document.getElementById("calOpenBtn").onclick = () => {
-       calPop.style.display = calPop.style.display==="block" ? "none" : "block";
-       renderCalendar();
-    };
-    
-    function renderCalendar() {
-       const y = calView.getFullYear();
-       const m = calView.getMonth();
-       document.getElementById("calTitle").textContent = `${MMM[m]} ${y}`;
-       const grid = document.getElementById("calGrid");
-       grid.innerHTML = '<div class="calDow">Su</div><div class="calDow">Mo</div><div class="calDow">Tu</div><div class="calDow">We</div><div class="calDow">Th</div><div class="calDow">Fr</div><div class="calDow">Sa</div>';
-       const firstDay = new Date(y,m,1).getDay();
-       const daysInMonth = new Date(y,m+1,0).getDate();
-       for(let i=0; i<firstDay; i++) grid.innerHTML += `<div class="calDay mutedDay"></div>`;
-       for(let d=1; d<=daysInMonth; d++) {
-          const div = document.createElement("div");
-          div.className = "calDay";
-          div.textContent = d;
-          div.onclick = () => {
-             const iso = `${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-             document.getElementById("mDateISO").value = iso;
-             document.getElementById("mDateDisplay").value = fmtDateDDMMMYYYY(iso);
-             calPop.style.display = "none";
-          };
-          grid.appendChild(div);
-       }
-    }
-    document.getElementById("calPrev").onclick = () => { calView.setMonth(calView.getMonth()-1); renderCalendar(); };
-    document.getElementById("calNext").onclick = () => { calView.setMonth(calView.getMonth()+1); renderCalendar(); };
-
-    // ─────────────────────────────────────────────
-    // CLOUD SETTINGS MODAL
-    // ─────────────────────────────────────────────
-    document.getElementById("btnCloudSettings").onclick = () => {
-       const cfg = CloudStore.getConfig();
-       document.getElementById("cloudUrl").value = cfg.url;
-       document.getElementById("cloudUser").value = cfg.user;
-       document.getElementById("cloudPass").value = cfg.pass;
-       document.getElementById("maskCloud").style.display = "flex";
-    };
-    document.getElementById("btnCloudCancel").onclick = () => document.getElementById("maskCloud").style.display = "none";
-    document.getElementById("btnCloudSave").onclick = () => {
-       CloudStore.saveConfig(
-         document.getElementById("cloudUrl").value,
-         document.getElementById("cloudUser").value,
-         document.getElementById("cloudPass").value
-       );
-       document.getElementById("maskCloud").style.display = "none";
-       showToast("Cloud configuration saved.");
-    };
-
-    document.getElementById("btnLoadCloud").onclick = () => CloudStore.loadFromCloud();
-    document.getElementById("btnSaveCloud").onclick = () => CloudStore.saveToCloud();
-
-    // ─────────────────────────────────────────────
-    // CLEAR
-    // ─────────────────────────────────────────────
-    document.getElementById("btnClear").onclick = () => {
-      AppStore.clearAll();
-      showToast("Ledger cleared.");
-    };
-
-    // ─────────────────────────────────────────────
-    // EXPORT XLSX  (uses active filter; includes closing balance row)
-    // ─────────────────────────────────────────────
-    document.getElementById("btnExportXlsx").onclick = () => {
-      const filteredKeys = getFilteredMonthKeys();
-      if(filteredKeys.length === 0) return showToast("No data to export.");
-      const wb = XLSX.utils.book_new();
-      for(const m of filteredKeys) {
-         const mData = AppStore.data[m];
-         if(!mData) continue;
-         const opening = mData.opening || 0;
-
-         // Opening row
-         const exportData = [{
-            Date: "Opening", Details: "Opening Balance",
-            Debit: '', Credit: '', Balance: opening, Remark: ""
-         }];
-
-         // Transaction rows — amount is signed: +debit / -credit
-         let runBal = opening;
-         for(const it of mData.items) {
-            runBal += it.amount;   // opening + debit - credit (amount already signed)
-            exportData.push({
-               Date:    fmtDateDDMMMYYYY(it.date),
-               Details: it.details,
-               Debit:   it.amount > 0 ? it.amount : '',
-               Credit:  it.amount < 0 ? Math.abs(it.amount) : '',
-               Balance: runBal,
-               Remark:  it.remark
-            });
-         }
-
-         // Closing balance summary row
-         exportData.push({
-            Date: "Closing", Details: "Closing Balance",
-            Debit: '', Credit: '', Balance: runBal, Remark: ""
-         });
-
-         const ws = XLSX.utils.json_to_sheet(exportData);
-         XLSX.utils.book_append_sheet(wb, ws, fmtMonthMMM(m));
-      }
-      const periodLabel = getPeriodLabel().replace("Period: ", "").replace(/[^A-Za-z0-9._-]/g, "_");
-      XLSX.writeFile(wb, `Ledger_${periodLabel}.xlsx`);
-      showToast("Exported to Excel.");
-    };
-
-    // ─────────────────────────────────────────────
-    // EXPORT PDF  (uses active filter; includes closing balance row per month)
-    // ─────────────────────────────────────────────
-    document.getElementById("btnExportPdf").onclick = () => {
-      const filteredKeys = getFilteredMonthKeys();
-      if(filteredKeys.length === 0) return showToast("No data to export.");
-      if(!window.jspdf) return showToast("PDF library still loading, please wait.");
-      const { jsPDF } = window.jspdf;
-      const doc = new jsPDF();
-      doc.setFontSize(16);
-      doc.text("Ledger Export", 14, 20);
-      doc.setFontSize(10);
-      doc.setTextColor(100);
-      let finalY = 30;
-      for(const m of filteredKeys) {
-         const mData = AppStore.data[m];
-         if(!mData) continue;
-         const opening = mData.opening || 0;
-
-         // Transaction rows
-         let runBal = opening;
-         const tableBody = [];
-         for(const it of mData.items) {
-            runBal += it.amount;   // opening + debit - credit (amount already signed)
-            tableBody.push([
-               fmtDateDDMMMYYYY(it.date),
-               it.details,
-               it.amount > 0 ? fmt(it.amount) : '',
-               it.amount < 0 ? fmt(Math.abs(it.amount)) : '',
-               fmt(runBal)
-            ]);
-         }
-
-         // Closing balance summary row appended to the table body
-         tableBody.push([
-            'Closing', 'Closing Balance', '', '', fmt(runBal)
-         ]);
-
-         doc.text(`${fmtMonthMMM(m)} — Opening: ${fmt(opening)}`, 14, finalY);
-         doc.autoTable({
-           startY: finalY + 5,
-           head: [['Date', 'Details', 'Debit (+)', 'Credit (−)', 'Balance']],
-           body: tableBody,
-           theme: 'grid',
-           headStyles: { fillColor: [124, 92, 255] },
-           // Bold the closing balance row (last row)
-           didParseCell: (data) => {
-             if(data.row.index === tableBody.length - 1) {
-               data.cell.styles.fontStyle = 'bold';
-             }
-           },
-           margin: { left: 14 }
-         });
-         finalY = doc.lastAutoTable.finalY + 15;
-         if(finalY > 260) { doc.addPage(); finalY = 20; }
-      }
-      const periodLabel = getPeriodLabel().replace("Period: ", "").replace(/[^A-Za-z0-9._-]/g, "_");
-      doc.save(`Ledger_${periodLabel}.pdf`);
-      showToast("Exported to PDF.");
-    };
-    
-    // ─────────────────────────────────────────────
-    // FILTER DROPDOWN HANDLERS
-    // ─────────────────────────────────────────────
-    document.getElementById("yearFilter").onchange = () => {
-      // Clear month dropdown and tab selection so year filter takes priority
-      document.getElementById("monthNameFilter").value = "";
-      AppStore.activeMonth = null;
-      AppStore.renderDashboard();
-    };
-
-    document.getElementById("monthNameFilter").onchange = () => {
-      // Clear year dropdown and tab selection so month filter takes priority
-      document.getElementById("yearFilter").value = "";
-      AppStore.activeMonth = null;
-      AppStore.renderDashboard();
-    };
-
-    // Boot
-    window.onload = () => AppStore.init();
+    window.onload = () => App.boot();
   </script>
 </body>
 </html>
