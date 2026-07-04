@@ -1478,8 +1478,11 @@
            if(finalY > 260) { doc.addPage(); finalY = 20; }
         }
         const periodLabel = Render.getPeriodLabel().replace("Period: ", "").replace(/[^A-Za-z0-9._-]/g, "_");
-        doc.save(`Ledger_${periodLabel}.pdf`);
-        showToast("Exported to PDF.");
+        // Prefix reflects lock status: "Final" only when every exported month is locked, otherwise "Draft".
+        const allLocked = filteredKeys.every(m => AppStore.data[m] && AppStore.data[m].locked);
+        const statusPrefix = allLocked ? "Final" : "Draft";
+        doc.save(`${statusPrefix}_Ledger_${periodLabel}.pdf`);
+        showToast(`Exported to PDF (${statusPrefix}).`);
       }
     };
 
